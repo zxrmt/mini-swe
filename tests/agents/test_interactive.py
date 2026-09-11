@@ -5,7 +5,7 @@ from unittest.mock import patch
 import pytest
 import yaml
 
-from minisweagent.agents.interactive import InteractiveAgent, _format_observation_block
+from minisweagent.agents.interactive import InteractiveAgent, _format_action_line, _format_observation_block
 from minisweagent.environments.local import LocalEnvironment
 from minisweagent.models.utils.content_string import get_content_string
 from minisweagent.models.test_models import (
@@ -1255,6 +1255,18 @@ def test_submission_enter_quits(model_factory):
     assert info["exit_status"] == "Submitted"
     assert info["submission"] == "completed\n"
     assert agent.n_calls == 1
+
+
+@pytest.mark.parametrize(
+    ("command", "expected"),
+    [
+        ("ls -la", "Bash(ls -la)"),
+        ("cat <<'EOF' > f.py\nprint(1)\nEOF", "Bash(cat <<'EOF' > f.py…)"),
+        ("x" * 200, f"Bash({'x' * 70}…)"),
+    ],
+)
+def test_format_action_line(command, expected):
+    assert _format_action_line(command) == expected
 
 
 @pytest.mark.parametrize(

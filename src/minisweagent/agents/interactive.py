@@ -27,8 +27,10 @@ BULLET, ELBOW, ELLIPSIS = (
 
 
 def _format_action_line(command: str) -> str:
+    """One-line command summary, elided to fit the terminal."""
     first_line, _, rest = command.partition("\n")
-    return f"Bash({first_line}{ELLIPSIS if rest else ''})"
+    limit = max(console.width - 10, 20)  # leave room for the bullet and "Bash(...)"
+    return f"Bash({first_line[:limit]}{ELLIPSIS if rest or len(first_line) > limit else ''})"
 
 
 def _format_observation_block(content: str, max_lines: int) -> str:
@@ -48,7 +50,7 @@ class InteractiveAgentConfig(AgentConfig):
     """If the agent wants to finish, do we ask for confirmation from user?"""
     quiet: bool = False
     """Hide the system/instance prompts and print observations without the returncode/key wrappers."""
-    observation_display_lines: int = 0
+    observation_display_lines: int = 3
     """Only display this many lines of every command output (0 = all). The model still sees all of it."""
 
 
