@@ -2,6 +2,9 @@
 
 import json
 
+_REASONING_BLOCK_TYPES = ("thinking", "reasoning", "reasoning_text", "reasoning.text")
+_REASONING_LIST_FIELDS = ("thinking_blocks", "reasoning_items", "reasoning_details")
+
 
 def _format_tool_call(args_str: str) -> str:
     """Format tool call arguments, extracting command if it's a bash call."""
@@ -31,23 +34,94 @@ def _format_observation(content: str, quiet: bool = False) -> str | None:
         return content
 
 
-def get_content_string(message: dict, *, quiet: bool = False, skip_tool_calls: bool = False) -> str:
+def _reasoning_texts_from_item(item: dict) -> list[str]:
+    """Extract human-readable reasoning from a content block or reasoning item."""
+    if not isinstance(item, dict) or item.get("type") == "redacted_thinking":
+        return []
+    texts = []
+    if thinking := item.get("thinking"):
+        texts.append(thinking)
+    if summary := item.get("summary"):
+        if isinstance(summary, str):
+            texts.append(summary)
+        elif isinstance(summary, list):
+            for part in summary:
+                if isinstance(part, str) and part:
+                    texts.append(part)
+                elif isinstance(part, dict) and (text := part.get("text")):
+                    texts.append(text)
+    for key in ("text", "reasoning"):
+        if isinstance(value := item.get(key), str) and value:
+            texts.append(value)
+    if isinstance(content := item.get("content"), str):
+        texts.append(content)
+    elif isinstance(content, list):
+        for part in content:
+            if isinstance(part, str) and part:
+                texts.append(part)
+            elif isinstance(part, dict):
+                texts.extend(_reasoning_texts_from_item(part))
+    return texts
+
+
+def _extract_reasoning_texts(message: dict) -> list[str]:
+    """Collect reasoning/thinking text from all supported message formats."""
+    texts = []
+    if isinstance(reasoning := message.get("reasoning_content"), str):
+        texts.append(reasoning)
+    for field in ("reasoning", "thinking"):
+        if isinstance(value := message.get(field), str):
+            texts.append(value)
+    for field in _REASONING_LIST_FIELDS:
+        if isinstance(items := message.get(field), list):
+            for item in items:
+                if isinstance(item, str):
+                    texts.append(item)
+                elif isinstance(item, dict):
+                    texts.extend(_reasoning_texts_from_item(item))
+    if isinstance(content := message.get("content"), list):
+        for item in content:
+            if isinstance(item, dict) and item.get("type") in _REASONING_BLOCK_TYPES:
+                texts.extend(_reasoning_texts_from_item(item))
+    if isinstance(output := message.get("output"), list):
+        for item in output:
+            if isinstance(item, dict) and item.get("type") in _REASONING_BLOCK_TYPES:
+                texts.extend(_reasoning_texts_from_item(item))
+    deduped = list(dict.fromkeys(text for text in texts if text))
+    # Some providers expose both a concatenated reasoning string and the individual
+    # blocks it was built from. Keep the concatenated form instead of printing both.
+    if len(deduped) > 1 and "".join(deduped[1:]) == deduped[0]:
+        return deduped[:1]
+    return deduped
+
+
+def get_reasoning_string(message: dict) -> str:
+    """Extract only the reasoning/thinking text from any supported message format."""
+    return "\n\n".join(_extract_reasoning_texts(message))
+
+
+def get_content_string(
+    message: dict, *, quiet: bool = False, skip_tool_calls: bool = False, include_reasoning: bool = True
+) -> str:
     """Extract text content from any message format for display.
     Should support both OpenAI and Anthropic message formats.
 
     Set ``quiet`` to print observations without the returncode/key wrappers.
     Set ``skip_tool_calls`` to get only the reasoning text, without the commands.
+    Set ``include_reasoning`` to control whether thinking/reasoning tokens are included.
 
     Handles:
     - Traditional chat: {"content": "text"}
     - Multimodal chat: {"content": [{"type": "text", "text": "..."}]}
     - Anthropic tool use: {"content": [{"type": "tool_use", "input": {...}}]}
     - Anthropic tool result: {"content": [{"type": "tool_result", "content": "..."}]}
+    - Anthropic thinking: {"content": [{"type": "thinking", "thinking": "..."}]}
+    - Reasoning fields: {"reasoning_content": "..."} and {"thinking_blocks": [...]}
     - Observation messages: {"content": "{\"returncode\": 0, \"output\": \"...\"}"}
     - Traditional tool calls: {"tool_calls": [{"function": {"name": "...", "arguments": "..."}}]}
     - Responses API: {"output": [{"type": "message", "content": [...]}]}
     """
-    texts = []
+    texts = _extract_reasoning_texts(message) if include_reasoning else []
 
     # Extract content (string or multimodal list)
     content = message.get("content")
@@ -56,6 +130,8 @@ def get_content_string(message: dict, *, quiet: bool = False, skip_tool_calls: b
     elif isinstance(content, list):
         for item in content:
             if not isinstance(item, dict):
+                continue
+            if item.get("type") in (*_REASONING_BLOCK_TYPES, "redacted_thinking"):
                 continue
             if item.get("type") == "tool_use":
                 if not skip_tool_calls:

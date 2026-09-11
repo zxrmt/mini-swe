@@ -23,6 +23,22 @@ Useful switches:
   It's enough to specify the name of the config file, e.g., `-c mini.yaml` (see [global configuration](../advanced/global_configuration.md) for how it is resolved).
 - `-m`/`--model`: Specify a model to use, else we will use the model `MSWEA_MODEL_NAME` environment variable (see [global configuration](../advanced/global_configuration.md))
 - `-y`/`--yolo`: Start in `yolo` mode (see below)
+- `-r`/`--resume`: Resume an interrupted run from its saved trajectory instead of starting a new task.
+  Resumes the `-o`/`--output` file (or a trajectory passed as a positional argument).
+
+## Resuming an interrupted run
+
+`mini` persists the trajectory after every step, so an interrupted run (Ctrl+C, crash, closed terminal)
+can be continued instead of restarted:
+
+```bash
+mini --resume                        # continue the last run (the default output file)
+mini --resume path/to/run.traj.json  # continue a specific trajectory
+mini -r -o path/to/run.traj.json     # same, using --output
+```
+
+Resuming restores the message history, the task, the accumulated cost/model calls and the model and
+environment configuration, then continues from the last saved step and writes back to the same file.
 
 ## Modes of operation
 

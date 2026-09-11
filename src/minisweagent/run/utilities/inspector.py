@@ -19,7 +19,7 @@ from textual.command import DiscoveryHit, Hit, Hits, Provider
 from textual.containers import Container, Vertical, VerticalScroll
 from textual.widgets import Footer, Header, Static
 
-from minisweagent.models.utils.content_string import get_content_string
+from minisweagent.models.utils.content_string import get_content_string, get_reasoning_string
 
 
 def _messages_to_steps(messages: list[dict]) -> list[list[dict]]:
@@ -203,15 +203,15 @@ class TrajectoryInspector(App):
             return
 
         for message in self.steps[self.i_step]:
-            content_str = get_content_string(message)
+            content_str = get_content_string(message, include_reasoning=False)
             message_container = Vertical(classes="message-container")
             container.mount(message_container)
             role = message.get("role") or message.get("type") or "unknown"
             message_container.mount(Static(role.upper(), classes="message-header"))
             clean_str = content_str.replace("\x00", "")
             message_container.mount(Static(Text.from_ansi(clean_str, no_wrap=False), classes="message-content"))
-            reasoning = message.get("reasoning_content")
-            if reasoning and self.show_reasoning and role.lower() == "assistant":
+            reasoning = get_reasoning_string(message)
+            if reasoning and self.show_reasoning:
                 clean_reasoning = reasoning.replace("\x00", "")
                 message_container.mount(Static("REASONING", classes="reasoning-header"))
                 message_container.mount(

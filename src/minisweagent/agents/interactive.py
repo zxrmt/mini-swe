@@ -11,12 +11,13 @@ import sys
 from typing import Literal, NoReturn
 
 from rich.console import Console
+from rich.markup import escape
 from rich.rule import Rule
 
 from minisweagent.agents.default import AgentConfig, DefaultAgent
 from minisweagent.agents.utils.prompt_user import _multiline_prompt, prompt_session
 from minisweagent.exceptions import LimitsExceeded, Submitted, TimeExceeded, UserInterruption
-from minisweagent.models.utils.content_string import get_content_string
+from minisweagent.models.utils.content_string import get_content_string, get_reasoning_string
 
 console = Console(highlight=False)
 
@@ -83,7 +84,10 @@ class InteractiveAgent(DefaultAgent):
 
     def _print_message(self, msg: dict) -> None:
         extra = msg.get("extra", {})
-        content = get_content_string(msg, quiet=self.config.quiet, skip_tool_calls=True)
+        reasoning = get_reasoning_string(msg)
+        content = get_content_string(
+            msg, quiet=self.config.quiet, skip_tool_calls=True, include_reasoning=False
+        )
         if "returncode" in extra:  # command output belongs under the command that produced it
             rows, truncated = _observation_rows(content, self.config.observation_display_lines)
             failed = extra.get("returncode") or extra.get("exception_info")
@@ -91,12 +95,17 @@ class InteractiveAgent(DefaultAgent):
             console.print("\n     ".join(rows), markup=False)
             return
         if (role := msg.get("role") or msg.get("type", "unknown")) == "assistant":
+            task = str(self.extra_template_vars.get("task", ""))[:100]
             console.print(
                 f"\n[green]{BULLET}[/green] [bold green]mini-swe-agent[/bold green] "
                 f"(step [bold]{self.n_calls}[/bold], [bold]${self.cost:.2f}[/bold])"
+                + (f" [dim cyan]{escape(task)}[/]" if task else ""),
+                soft_wrap=True,
             )
         else:
             console.print(f"\n[bold green]{BULLET}[/bold green] [bold green]{role.capitalize()}[/bold green]")
+        if reasoning:
+            console.print(reasoning, markup=False, style="dim grey50")
         if content:
             console.print(content, markup=False)
         for action in extra.get("actions", []):
@@ -205,6 +214,7 @@ class InteractiveAgent(DefaultAgent):
             elif user_input in self._MODE_COMMANDS_MAPPING:  # ask again
                 return self._check_for_new_task_or_submit(e)
             elif user_input:
+                self.extra_template_vars["task"] = user_input
                 self._interrupt(f"The user added a new task: {user_input}", itype="UserNewTask")
         raise e
 

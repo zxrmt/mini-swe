@@ -3,6 +3,7 @@
 """Run mini-SWE-agent in your local environment. This is the default executable `mini`."""
 # Read this first: https://mini-swe-agent.com/latest/usage/mini/  (usage)
 
+import json
 import os
 from pathlib import Path
 from typing import Any
@@ -86,6 +87,8 @@ def main(
     config_spec: list[str] = typer.Option([str(DEFAULT_CONFIG_FILE)], "-c", "--config", help=_CONFIG_SPEC_HELP_TEXT),
     output: Path | None = typer.Option(DEFAULT_OUTPUT_FILE, "-o", "--output", help="Output trajectory file"),
     exit_immediately: bool = typer.Option(False, "--exit-immediately", help="Exit immediately when the agent wants to finish instead of prompting.", rich_help_panel="Advanced"),
+    resume: bool = typer.Option(False, "-r", "--resume", help="Continue an interrupted run from its saved trajectory instead of starting a new task.", rich_help_panel="Advanced"),
+    resume_path: Path | None = typer.Argument(None, help="Trajectory to resume from (defaults to the --output file)."),
 ) -> Any:
     # fmt: on
     configure_if_first_time()
@@ -114,17 +117,55 @@ def main(
     })
     config = recursive_merge(*configs)
 
+    # Resume when asked explicitly (--resume), when a trajectory path is passed (either as
+    # `resume` or as the positional `resume_path`). Note that when `main` is called directly in
+    # python, `resume`/`resume_path` are the typer defaults, so check the concrete types.
+    resume_file = None
+    if isinstance(resume, (str, Path)):
+        resume_file = Path(resume)
+    elif isinstance(resume_path, Path):
+        resume_file = resume_path
+    elif resume is True:
+        resume_file = output if isinstance(output, Path) else DEFAULT_OUTPUT_FILE
+    resume = resume_file is not None
+    if resume:
+        resume_file = resume_file or DEFAULT_OUTPUT_FILE
+        if not resume_file.exists():
+            raise typer.BadParameter(f"Cannot resume: trajectory file not found: {resume_file}")
+        resume_data = json.loads(resume_file.read_text())
+        if not isinstance(resume_data, dict) or "messages" not in resume_data:
+            raise typer.BadParameter(f"Cannot resume: not a saved mini-swe-agent trajectory: {resume_file}")
+        saved_config = (resume_data.get("info") or {}).get("config") or {}
+        # Restore the model/environment/agent used by the run we resume, letting explicit CLI options win.
+        config = recursive_merge(
+            {
+                "model": {**(saved_config.get("model") or {}), "model_class": saved_config.get("model_type", UNSET)},
+                "environment": {
+                    **(saved_config.get("environment") or {}),
+                    "environment_class": saved_config.get("environment_type", UNSET),
+                },
+                "agent": {**(saved_config.get("agent") or {}), "agent_class": saved_config.get("agent_type", UNSET)},
+            },
+            config,
+        )
+        config.setdefault("agent", {})["output_path"] = resume_file
+
     console.print(
         _welcome_board(get_model_name(config=config.get("model", {})), config_spec, config.get("agent", {}))
     )
 
-    if (run_task := config.get("run", {}).get("task", UNSET)) is UNSET:
+    if resume:
+        run_task = ""
+        console.print(f"Resuming interrupted run from [bold green]'{resume_file}'[/bold green]")
+    elif (run_task := config.get("run", {}).get("task", UNSET)) is UNSET:
         console.print("[bold yellow]What do you want to do?")
         run_task = _multiline_prompt()
 
     model = get_model(config=config.get("model", {}))
     env = get_environment(config.get("environment", {}), default_type="local")
     agent = get_agent(model, env, config.get("agent", {}), default_type="interactive")
+    if resume:
+        agent.load(resume_file)
     agent.run(run_task)
     if (output_path := config.get("agent", {}).get("output_path")):
         console.print(f"Saved trajectory to [bold green]'{output_path}'[/bold green]")

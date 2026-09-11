@@ -86,14 +86,20 @@ class DefaultAgent:
         )
 
     def run(self, task: str = "", **kwargs) -> dict:
-        """Run step() until agent is finished. Returns dictionary with exit_status, submission keys."""
-        self.extra_template_vars |= {"task": task, **kwargs}
-        self.messages = []
-        self.add_messages(
-            self.model.format_message(role="system", content=self._render_template(self.config.system_template)),
-            self.model.format_message(role="user", content=self._render_template(self.config.instance_template)),
-        )
-        while True:
+        """Run step() until agent is finished. Returns dictionary with exit_status, submission keys.
+
+        If the agent already holds messages (for example after `load`), those are continued instead
+        of starting a new trajectory. Passing ``resume=<path>`` loads that trajectory first.
+        """
+        if (resume := kwargs.pop("resume", None)) is not None:
+            self.load(None if resume is True else resume)
+        if not self.messages:
+            self.extra_template_vars |= {"task": task, **kwargs}
+            self.add_messages(
+                self.model.format_message(role="system", content=self._render_template(self.config.system_template)),
+                self.model.format_message(role="user", content=self._render_template(self.config.instance_template)),
+            )
+        while self.messages[-1].get("role") != "exit":
             try:
                 self.step()
                 self.n_consecutive_format_errors = 0  # reset on any clean step
@@ -119,9 +125,35 @@ class DefaultAgent:
                 raise
             finally:
                 self.save(self.config.output_path)
-            if self.messages[-1].get("role") == "exit":
-                break
         return self.messages[-1].get("extra", {})
+
+    def load(self, path: Path | None = None) -> dict:
+        """Load a saved trajectory and restore the agent state so that `run` can continue it.
+
+        This restores the message history, the model call/cost counters, the task and the wall-clock
+        start time, and makes subsequent calls to `save` write back to `path` (defaults to the
+        configured output path).
+        """
+        path = Path(path or self.config.output_path)
+        data = json.loads(path.read_text())
+        messages = data.get("messages")
+        if not messages:
+            raise ValueError(f"Trajectory {path} does not contain any messages")
+        self.messages = messages
+        info = data.get("info", {})
+        stats = info.get("model_stats", {})
+        self.cost = stats.get("instance_cost", self.cost)
+        self.n_calls = stats.get("api_calls", self.n_calls)
+        if task := info.get("task"):
+            self.extra_template_vars["task"] = task
+        self._start_time = time.time() - info.get("elapsed_seconds", 0)
+        self.config.output_path = path
+        return data
+
+    def resume(self, path: Path | None = None) -> dict:
+        """Load a saved trajectory and continue it from where it stopped."""
+        self.load(path)
+        return self.run()
 
     def step(self) -> list[dict]:
         """Query the LM, execute actions."""
@@ -171,6 +203,8 @@ class DefaultAgent:
                     "agent_type": f"{self.__class__.__module__}.{self.__class__.__name__}",
                 },
                 "mini_version": __version__,
+                "task": self.extra_template_vars.get("task", ""),
+                "elapsed_seconds": int(time.time() - self._start_time),
                 "exit_status": last_extra.get("exit_status", ""),
                 "submission": last_extra.get("submission", ""),
             },

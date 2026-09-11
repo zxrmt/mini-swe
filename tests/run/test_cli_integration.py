@@ -1,3 +1,4 @@
+import json
 import re
 import subprocess
 import sys
@@ -704,3 +705,94 @@ def test_output_file_is_created(tmp_path):
             print(f"Error output: {result.output}")
         assert result.exit_code == 0
         assert output_file.exists(), f"Output file {output_file} was not created"
+
+
+def _write_interrupted_trajectory(path: Path, *, remaining_submission: str = "resumed") -> None:
+    """Write a non-terminal trajectory whose saved model config completes on resume."""
+    import yaml
+
+    from minisweagent.agents.default import DefaultAgent
+    from minisweagent.environments.local import LocalEnvironment
+    from minisweagent.models.test_models import DeterministicModel, make_output
+
+    config = yaml.safe_load(Path("src/minisweagent/config/default.yaml").read_text())["agent"]
+    agent = DefaultAgent(
+        DeterministicModel(
+            outputs=[
+                make_output(
+                    "done", [{"command": f"echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT\necho {remaining_submission}"}]
+                )
+            ]
+        ),
+        LocalEnvironment(),
+        **config,
+    )
+    agent.extra_template_vars["task"] = "Test task"
+    agent.messages = [
+        agent.model.format_message(role="system", content="system prompt"),
+        agent.model.format_message(role="user", content="Please solve: Test task"),
+    ]
+    agent.cost = 0.5
+    agent.n_calls = 2
+    agent.save(path)
+
+
+def test_cli_resume_continues_a_saved_trajectory(tmp_path):
+    """`mini --resume <traj>` continues the run and writes the result back to the same file."""
+    from typer.testing import CliRunner
+
+    trajectory = tmp_path / "run.traj.json"
+    _write_interrupted_trajectory(trajectory)
+
+    with patch("minisweagent.run.mini.configure_if_first_time"):
+        result = CliRunner().invoke(app, ["--resume", str(trajectory)])
+
+    assert result.exit_code == 0, result.output
+    saved = json.loads(trajectory.read_text())
+    assert saved["info"]["exit_status"] == "Submitted"
+    assert saved["info"]["submission"] == "resumed\n"
+    assert saved["info"]["model_stats"] == {"instance_cost": 1.5, "api_calls": 3}
+
+
+def test_cli_resume_missing_file_fails_cleanly(tmp_path):
+    from typer.testing import CliRunner
+
+    result = CliRunner().invoke(app, ["--resume", str(tmp_path / "missing.traj.json")])
+
+    assert result.exit_code != 0
+    assert "trajectory file not found" in result.output
+
+
+def test_main_resume_loads_trajectory_and_skips_task_prompt(tmp_path):
+    """Directly calling main with `resume=<path>` must load that path and run without prompting."""
+    trajectory = tmp_path / "run.traj.json"
+    _write_interrupted_trajectory(trajectory)
+    with (
+        patch("minisweagent.run.mini.configure_if_first_time"),
+        patch("minisweagent.run.mini._multiline_prompt") as mock_prompt,
+        patch("minisweagent.run.mini.get_agent") as mock_get_agent,
+        patch("minisweagent.run.mini.get_model") as mock_get_model,
+        patch("minisweagent.run.mini.get_environment") as mock_get_env,
+        patch("minisweagent.run.mini.get_config_from_spec") as mock_get_config,
+    ):
+        mock_get_model.return_value = Mock()
+        mock_get_env.return_value = Mock()
+        mock_agent = Mock()
+        mock_agent.run.return_value = {"exit_status": "Submitted", "submission": "resumed"}
+        mock_get_agent.return_value = mock_agent
+        mock_get_config.return_value = {"agent": {}, "run": {}, "model": {}, "environment": {}}
+
+        main(
+            config_spec=[str(DEFAULT_CONFIG_FILE)],
+            model_name=None,
+            model_class=None,
+            agent_class=None,
+            environment_class=None,
+            task=None,
+            output=None,
+            resume=trajectory,
+        )
+
+    mock_agent.load.assert_called_once_with(trajectory)
+    mock_agent.run.assert_called_once_with("")
+    mock_prompt.assert_not_called()
