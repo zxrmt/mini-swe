@@ -85,9 +85,7 @@ class InteractiveAgent(DefaultAgent):
     def _print_message(self, msg: dict) -> None:
         extra = msg.get("extra", {})
         reasoning = get_reasoning_string(msg)
-        content = get_content_string(
-            msg, quiet=self.config.quiet, skip_tool_calls=True, include_reasoning=False
-        )
+        content = get_content_string(msg, quiet=self.config.quiet, skip_tool_calls=True, include_reasoning=False)
         if "returncode" in extra:  # command output belongs under the command that produced it
             rows, truncated = _observation_rows(content, self.config.observation_display_lines)
             failed = extra.get("returncode") or extra.get("exception_info")
@@ -189,7 +187,6 @@ class InteractiveAgent(DefaultAgent):
             for action in actions:
                 outputs.append(self.env.execute(action))
         except Submitted as e:
-            outputs.append({"output": e.messages[0].get("content", ""), "returncode": 0, "exception_info": ""})
             self._check_for_new_task_or_submit(e)
         finally:
             result = self.add_messages(
