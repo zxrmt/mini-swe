@@ -5,8 +5,9 @@ from unittest.mock import patch
 import pytest
 import yaml
 
-from minisweagent.agents.interactive import InteractiveAgent
+from minisweagent.agents.interactive import InteractiveAgent, _format_observation_block
 from minisweagent.environments.local import LocalEnvironment
+from minisweagent.models.utils.content_string import get_content_string
 from minisweagent.models.test_models import (
     DeterministicModel,
     DeterministicResponseAPIToolcallModel,
@@ -1254,3 +1255,57 @@ def test_submission_enter_quits(model_factory):
     assert info["exit_status"] == "Submitted"
     assert info["submission"] == "completed\n"
     assert agent.n_calls == 1
+
+
+@pytest.mark.parametrize(
+    ("content", "max_lines", "expected"),
+    [
+        ("", 0, "  ⎿  (No output)"),
+        ("single", 3, "  ⎿  single"),
+        ("a\nb\nc", 0, "  ⎿  a\n     b\n     c"),
+        ("a\nb\nc\nd", 3, "  ⎿  a\n     b\n     c\n     … +1 lines"),
+        ("a\nb\nc", 3, "  ⎿  a\n     b\n     c"),
+    ],
+)
+def test_format_observation_block(content, max_lines, expected):
+    assert _format_observation_block(content, max_lines) == expected
+
+
+def test_display_truncation_does_not_reach_the_model(toolcall_config, capsys):
+    """Long outputs are elided on screen, but the model still gets all of them."""
+    agent = InteractiveAgent(
+        model=make_tc_model(
+            [
+                ("Counting", [{"command": "seq 1 20"}]),
+                ("Finishing", [{"command": "echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT"}]),
+            ],
+            observation_template="{{ output.output }}",
+        ),
+        env=LocalEnvironment(),
+        **{**toolcall_config, "mode": "yolo", "confirm_exit": False, "observation_display_lines": 3},
+    )
+    agent.run("Test truncation")
+    output = capsys.readouterr().out
+    assert "● Bash(seq 1 20)" in output
+    assert "  ⎿  1\n     2\n     3\n     … +17 lines" in output
+    assert "\n     20\n" not in output
+    assert "20" in get_content_string(agent.messages[3])
+
+
+def test_text_based_model_does_not_repeat_its_command(default_config, capsys):
+    """Text-based models spell out the command in their reasoning, so no extra action line."""
+    agent = InteractiveAgent(
+        model=make_text_model(
+            [
+                ("Counting\n```bash\nseq 1 3\n```", [{"command": "seq 1 3"}]),
+                ("Finishing", [{"command": "echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT"}]),
+            ],
+            observation_template="{{ output.output }}",
+        ),
+        env=LocalEnvironment(),
+        **{**default_config, "mode": "yolo", "confirm_exit": False},
+    )
+    agent.run("Test no duplicate command")
+    output = capsys.readouterr().out
+    assert "Bash(" not in output
+    assert "seq 1 3" in output and "  ⎿  " in output

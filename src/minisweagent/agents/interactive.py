@@ -21,6 +21,19 @@ from minisweagent.models.utils.content_string import get_content_string
 console = Console(highlight=False)
 
 
+def _format_action_line(command: str) -> str:
+    first_line, _, rest = command.partition("\n")
+    return f"Bash({first_line}{'…' if rest else ''})"
+
+
+def _format_observation_block(content: str, max_lines: int) -> str:
+    """Render an observation as an indented result block below its command."""
+    lines = content.splitlines() or ["(No output)"]
+    if 0 < max_lines < len(lines):
+        lines = lines[:max_lines] + [f"… +{len(lines) - max_lines} lines"]
+    return "\n".join([f"  ⎿  {lines[0]}"] + [f"     {line}" for line in lines[1:]])
+
+
 class InteractiveAgentConfig(AgentConfig):
     mode: Literal["human", "confirm", "yolo"] = "confirm"
     """Whether to confirm actions."""
@@ -30,6 +43,8 @@ class InteractiveAgentConfig(AgentConfig):
     """If the agent wants to finish, do we ask for confirmation from user?"""
     quiet: bool = False
     """Hide the system/instance prompts and print observations without the returncode/key wrappers."""
+    observation_display_lines: int = 0
+    """Only display this many lines of every command output (0 = all). The model still sees all of it."""
 
 
 class InteractiveAgent(DefaultAgent):
@@ -47,18 +62,28 @@ class InteractiveAgent(DefaultAgent):
         for msg in messages:
             if self.config.quiet and not self.messages:  # system prompt & instance template
                 continue
-            role = msg.get("role") or msg.get("type", "unknown")
-            content = get_content_string(msg, quiet=self.config.quiet)
-            if role == "assistant":
-                console.print(
-                    f"\n[red][bold]mini-swe-agent[/bold] (step [bold]{self.n_calls}[/bold], [bold]${self.cost:.2f}[/bold]):[/red]\n",
-                    end="",
-                    highlight=False,
-                )
-            else:
-                console.print(f"\n[bold green]{role.capitalize()}[/bold green]:\n", end="", highlight=False)
-            console.print(content, highlight=False, markup=False)
+            self._print_message(msg)
         return super().add_messages(*messages)
+
+    def _print_message(self, msg: dict) -> None:
+        extra = msg.get("extra", {})
+        content = get_content_string(msg, quiet=self.config.quiet, skip_tool_calls=True)
+        if "returncode" in extra:  # command output belongs under the command that produced it
+            console.print(_format_observation_block(content, self.config.observation_display_lines), markup=False)
+            return
+        if (role := msg.get("role") or msg.get("type", "unknown")) == "assistant":
+            console.print(
+                f"\n[red]●[/red] [bold red]mini-swe-agent[/bold red] "
+                f"(step [bold]{self.n_calls}[/bold], [bold]${self.cost:.2f}[/bold])"
+            )
+        else:
+            console.print(f"\n[bold green]●[/bold green] [bold green]{role.capitalize()}[/bold green]")
+        if content:
+            console.print(content, markup=False)
+        for action in extra.get("actions", []):
+            if "tool_call_id" in action:  # text-based models already show the command in their reasoning
+                console.print("\n[green]●[/green] ", end="")
+                console.print(_format_action_line(action["command"]), markup=False)
 
     def query(self) -> dict:
         # Extend supermethod to handle human mode

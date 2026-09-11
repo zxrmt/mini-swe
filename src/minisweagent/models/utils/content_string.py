@@ -31,11 +31,12 @@ def _format_observation(content: str, quiet: bool = False) -> str | None:
         return content
 
 
-def get_content_string(message: dict, *, quiet: bool = False) -> str:
+def get_content_string(message: dict, *, quiet: bool = False, skip_tool_calls: bool = False) -> str:
     """Extract text content from any message format for display.
     Should support both OpenAI and Anthropic message formats.
 
     Set ``quiet`` to print observations without the returncode/key wrappers.
+    Set ``skip_tool_calls`` to get only the reasoning text, without the commands.
 
     Handles:
     - Traditional chat: {"content": "text"}
@@ -57,7 +58,8 @@ def get_content_string(message: dict, *, quiet: bool = False) -> str:
             if not isinstance(item, dict):
                 continue
             if item.get("type") == "tool_use":
-                texts.append(_format_tool_call(json.dumps(item.get("input", {}))))
+                if not skip_tool_calls:
+                    texts.append(_format_tool_call(json.dumps(item.get("input", {}))))
             elif item.get("type") == "tool_result":
                 rc = item.get("content", "")
                 if isinstance(rc, str):
@@ -66,7 +68,7 @@ def get_content_string(message: dict, *, quiet: bool = False) -> str:
                 texts.append(text)
 
     # Handle traditional tool_calls format (OpenAI/LiteLLM style)
-    if tool_calls := message.get("tool_calls"):
+    if (tool_calls := message.get("tool_calls")) and not skip_tool_calls:
         for tc in tool_calls:
             func = tc.get("function", {}) if isinstance(tc, dict) else getattr(tc, "function", None)
             if func:
@@ -85,7 +87,7 @@ def get_content_string(message: dict, *, quiet: bool = False) -> str:
                     for c in item.get("content", []):
                         if isinstance(c, dict) and (text := c.get("text")):
                             texts.append(text)
-                elif item.get("type") == "function_call":
+                elif item.get("type") == "function_call" and not skip_tool_calls:
                     texts.append(_format_tool_call(item.get("arguments", "{}")))
 
     return "\n\n".join(t for t in texts if t)
