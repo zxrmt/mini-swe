@@ -9,8 +9,9 @@ from typing import Any
 
 import typer
 from rich.console import Console
+from rich.panel import Panel
 
-from minisweagent import global_config_dir
+from minisweagent import __version__, global_config_dir
 from minisweagent.agents import get_agent
 from minisweagent.agents.utils.prompt_user import _multiline_prompt
 from minisweagent.config import builtin_config_dir, get_config_from_spec
@@ -50,6 +51,21 @@ console = Console(highlight=False)
 app = typer.Typer(rich_markup_mode="rich")
 
 
+def _welcome_board(model_name: str, config_spec: list[str], agent_config: dict) -> Panel:
+    """What this run is about to do: which model, which configs, which mode."""
+    specs = "\n       ".join(str(spec) for spec in config_spec)
+    mode = agent_config.get("mode", "confirm") + (" (quiet)" if agent_config.get("quiet") else "")
+    return Panel(
+        f"[bold]Model[/bold]  [green]{model_name}[/green]\n"
+        f"[bold]Config[/bold] {specs}\n"
+        f"[bold]Mode[/bold]   {mode}, cost limit ${agent_config.get('cost_limit', 0.0)}",
+        title=f"mini-swe-agent {__version__}",
+        title_align="left",
+        border_style="green",
+        expand=False,
+    )
+
+
 # fmt: off
 @app.command(help=_HELP_TEXT)
 def main(
@@ -69,7 +85,6 @@ def main(
     configure_if_first_time()
 
     # Build the config from the command line arguments
-    console.print(f"Building agent config from specs: [bold green]{config_spec}[/bold green]")
     configs = [get_config_from_spec(spec) for spec in config_spec]
     configs.append({
         "run": {
@@ -93,12 +108,14 @@ def main(
     })
     config = recursive_merge(*configs)
 
+    model = get_model(config=config.get("model", {}))
+    console.print(_welcome_board(model.config.model_name, config_spec, config.get("agent", {})))
+
     if (run_task := config.get("run", {}).get("task", UNSET)) is UNSET:
         console.print("[bold yellow]What do you want to do?")
         run_task = _multiline_prompt()
         console.print("[bold green]Got that, thanks![/bold green]")
 
-    model = get_model(config=config.get("model", {}))
     env = get_environment(config.get("environment", {}), default_type="local")
     agent = get_agent(model, env, config.get("agent", {}), default_type="interactive")
     agent.run(run_task)

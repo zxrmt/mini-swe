@@ -1,4 +1,3 @@
-from prompt_toolkit.formatted_text.html import HTML
 from prompt_toolkit.history import FileHistory
 from prompt_toolkit.key_binding import KeyBindings
 from prompt_toolkit.shortcuts import PromptSession
@@ -18,12 +17,4 @@ _multiline_prompt_session = PromptSession(history=_history, multiline=True, key_
 
 
 def _multiline_prompt() -> str:
-    return _multiline_prompt_session.prompt(
-        "",
-        bottom_toolbar=HTML(
-            "Submit message: <b fg='yellow' bg='black'>Enter</b> | "
-            "New line: <b fg='yellow' bg='black'>Ctrl+J</b> | "
-            "Navigate history: <b fg='yellow' bg='black'>Arrow Up/Down</b> | "
-            "Search history: <b fg='yellow' bg='black'>Ctrl+R</b>"
-        ),
-    )
+    return _multiline_prompt_session.prompt("")

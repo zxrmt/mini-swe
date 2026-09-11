@@ -20,18 +20,23 @@ from minisweagent.models.utils.content_string import get_content_string
 
 console = Console(highlight=False)
 
+# Legacy consoles (cp1252 & friends) cannot encode the markers, so fall back to ASCII there.
+BULLET, ELBOW, ELLIPSIS = (
+    ("●", "⎿", "…") if (sys.stdout.encoding or "").lower().replace("-", "").startswith("utf") else ("*", "\\_", "...")
+)
+
 
 def _format_action_line(command: str) -> str:
     first_line, _, rest = command.partition("\n")
-    return f"Bash({first_line}{'…' if rest else ''})"
+    return f"Bash({first_line}{ELLIPSIS if rest else ''})"
 
 
 def _format_observation_block(content: str, max_lines: int) -> str:
     """Render an observation as an indented result block below its command."""
     lines = content.splitlines() or ["(No output)"]
     if 0 < max_lines < len(lines):
-        lines = lines[:max_lines] + [f"… +{len(lines) - max_lines} lines"]
-    return "\n".join([f"  ⎿  {lines[0]}"] + [f"     {line}" for line in lines[1:]])
+        lines = lines[:max_lines] + [f"{ELLIPSIS} +{len(lines) - max_lines} lines"]
+    return "\n".join([f"  {ELBOW}  {lines[0]}"] + [f"     {line}" for line in lines[1:]])
 
 
 class InteractiveAgentConfig(AgentConfig):
@@ -73,16 +78,16 @@ class InteractiveAgent(DefaultAgent):
             return
         if (role := msg.get("role") or msg.get("type", "unknown")) == "assistant":
             console.print(
-                f"\n[red]●[/red] [bold red]mini-swe-agent[/bold red] "
+                f"\n[red]{BULLET}[/red] [bold red]mini-swe-agent[/bold red] "
                 f"(step [bold]{self.n_calls}[/bold], [bold]${self.cost:.2f}[/bold])"
             )
         else:
-            console.print(f"\n[bold green]●[/bold green] [bold green]{role.capitalize()}[/bold green]")
+            console.print(f"\n[bold green]{BULLET}[/bold green] [bold green]{role.capitalize()}[/bold green]")
         if content:
             console.print(content, markup=False)
         for action in extra.get("actions", []):
             if "tool_call_id" in action:  # text-based models already show the command in their reasoning
-                console.print("\n[green]●[/green] ", end="")
+                console.print(f"\n[green]{BULLET}[/green] ", end="")
                 console.print(_format_action_line(action["command"]), markup=False)
 
     def query(self) -> dict:
