@@ -135,6 +135,12 @@ def main(
     if (effort := get_reasoning_effort(model_config)) is not None:
         model_config.setdefault("reasoning_effort", effort)
 
+    # Capture the effort requested for *this* invocation (CLI/config/.env) before the
+    # resume merge below, which may reintroduce a saved `model_kwargs.reasoning_effort`.
+    # Since `model_kwargs` wins over the top-level shortcut, the saved entry would
+    # otherwise silently shadow a newly requested effort.
+    requested_reasoning_effort = get_reasoning_effort(model_config)
+
     # Resume when asked explicitly (--resume), when a trajectory path is passed (either as
     # `resume` or as the positional `resume_path`). Note that when `main` is called directly in
     # python, `resume`/`resume_path` are the typer defaults, so check the concrete types.
@@ -167,6 +173,13 @@ def main(
             config,
         )
         config.setdefault("agent", {})["output_path"] = resume_file
+
+        # Let an effort requested for this run win over the trajectory's saved value,
+        # so that e.g. `MSWEA_REASONING_EFFORT` or `--reasoning-effort` takes effect on resume.
+        if requested_reasoning_effort is not None:
+            merged_model_config = config.setdefault("model", {})
+            merged_model_config["reasoning_effort"] = requested_reasoning_effort
+            merged_model_config.setdefault("model_kwargs", {})["reasoning_effort"] = requested_reasoning_effort
 
     console.print(
         _welcome_board(

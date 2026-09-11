@@ -947,3 +947,51 @@ def test_main_resume_loads_trajectory_and_skips_task_prompt(tmp_path):
     mock_agent.load.assert_called_once_with(trajectory)
     mock_agent.run.assert_called_once_with("")
     mock_prompt.assert_not_called()
+
+
+def test_resume_requested_reasoning_effort_wins_over_saved(tmp_path, monkeypatch):
+    """A reasoning effort requested for the resumed run must override the saved trajectory's value."""
+    trajectory = tmp_path / "run.traj.json"
+    trajectory.write_text(
+        json.dumps(
+            {
+                "info": {
+                    "config": {
+                        "model": {
+                            "model_name": "openai/deepseek-flash",
+                            "reasoning_effort": "low",
+                            "model_kwargs": {"drop_params": True, "reasoning_effort": "low"},
+                        }
+                    }
+                },
+                "messages": [{"role": "system", "content": "system prompt"}],
+            }
+        )
+    )
+    monkeypatch.setenv("MSWEA_REASONING_EFFORT", "max")
+    captured = {}
+
+    def fake_get_model(*args, **kwargs):
+        captured["config"] = kwargs["config"]
+        return Mock()
+
+    with (
+        patch("minisweagent.run.mini.configure_if_first_time"),
+        patch("minisweagent.run.mini.get_agent", return_value=Mock()),
+        patch("minisweagent.run.mini.get_model", side_effect=fake_get_model),
+        patch("minisweagent.run.mini.get_environment", return_value=Mock()),
+        patch("minisweagent.run.mini.get_config_from_spec", return_value={"agent": {}, "run": {}, "model": {}}),
+    ):
+        main(
+            config_spec=[str(DEFAULT_CONFIG_FILE)],
+            model_name=None,
+            model_class=None,
+            agent_class=None,
+            environment_class=None,
+            task=None,
+            output=None,
+            resume=trajectory,
+        )
+
+    assert captured["config"]["reasoning_effort"] == "max"
+    assert captured["config"]["model_kwargs"]["reasoning_effort"] == "max"
