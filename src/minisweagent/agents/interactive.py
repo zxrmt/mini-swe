@@ -96,9 +96,9 @@ class InteractiveAgent(DefaultAgent):
             return
         if (role := msg.get("role") or msg.get("type", "unknown")) == "assistant":
             task = str(self.extra_template_vars.get("task", ""))[:100]
+            status = escape(f"[step {self.n_calls}] Task >")
             console.print(
-                f"\n[green]{BULLET}[/green] [bold green]mini-swe-agent[/bold green] "
-                f"(step [bold]{self.n_calls}[/bold], [bold]${self.cost:.2f}[/bold])"
+                f"\n[green]{BULLET}[/green] [bold green]{status}[/bold green]"
                 + (f" [dim cyan]{escape(task)}[/]" if task else ""),
                 soft_wrap=True,
             )
@@ -189,6 +189,7 @@ class InteractiveAgent(DefaultAgent):
             for action in actions:
                 outputs.append(self.env.execute(action))
         except Submitted as e:
+            outputs.append({"output": e.messages[0].get("content", ""), "returncode": 0, "exception_info": ""})
             self._check_for_new_task_or_submit(e)
         finally:
             result = self.add_messages(
@@ -203,8 +204,7 @@ class InteractiveAgent(DefaultAgent):
         """Check if user wants to add a new task or submit."""
         if self.config.confirm_exit:
             message = (
-                "[bold yellow]Agent wants to finish.[/bold yellow] "
-                "[bold green]Type new task[/bold green] or [bold]Enter[/bold] to quit "
+                "[bold yellow]Task Completed[/bold yellow] "
                 "([bold]/h[/bold] for commands)\n"
                 "[bold yellow]>[/bold yellow] "
             )

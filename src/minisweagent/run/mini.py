@@ -159,6 +159,7 @@ def main(
         console.print(f"Resuming interrupted run from [bold green]'{resume_file}'[/bold green]")
     elif (run_task := config.get("run", {}).get("task", UNSET)) is UNSET:
         console.print("[bold yellow]What do you want to do?")
+        console.print("[bold yellow]> [/bold yellow]", end="")
         run_task = _multiline_prompt()
 
     model = get_model(config=config.get("model", {}))
