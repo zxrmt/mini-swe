@@ -40,6 +40,7 @@ def test_local_end_to_end(local_test_data):
             model_name="tardis",
             config_spec=[str(DEFAULT_CONFIG_FILE)],
             yolo=True,
+            quiet=False,
             task="Blah blah blah",
             output=None,
             cost_limit=10,

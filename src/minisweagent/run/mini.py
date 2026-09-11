@@ -78,7 +78,7 @@ def main(
         "agent": {
             "agent_class": agent_class or UNSET,
             "mode": "yolo" if yolo else UNSET,
-            "quiet": quiet or UNSET,
+            "quiet": True if quiet else UNSET,
             "cost_limit": cost_limit if cost_limit is not None else UNSET,
             "confirm_exit": False if exit_immediately else UNSET,
             "output_path": output or UNSET,
