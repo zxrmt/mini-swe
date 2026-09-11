@@ -5,7 +5,7 @@ from unittest.mock import patch
 import pytest
 import yaml
 
-from minisweagent.agents.interactive import InteractiveAgent, _format_action_line, _format_observation_block
+from minisweagent.agents.interactive import InteractiveAgent, _format_action_line, _observation_rows
 from minisweagent.environments.local import LocalEnvironment
 from minisweagent.models.utils.content_string import get_content_string
 from minisweagent.models.test_models import (
@@ -1272,15 +1272,17 @@ def test_format_action_line(command, expected):
 @pytest.mark.parametrize(
     ("content", "max_lines", "expected"),
     [
-        ("", 0, "  ⎿  (No output)"),
-        ("single", 3, "  ⎿  single"),
-        ("a\nb\nc", 0, "  ⎿  a\n     b\n     c"),
-        ("a\nb\nc\nd", 3, "  ⎿  a\n     b\n     c\n     … +1 lines"),
-        ("a\nb\nc", 3, "  ⎿  a\n     b\n     c"),
+        ("", 0, (["(No output)"], False)),
+        ("single", 3, (["single"], False)),
+        ("a\nb\nc", 0, (["a", "b", "c"], False)),
+        ("a\nb\nc\nd", 3, (["a", "b", "c", "… +1 lines"], True)),
+        ("a\nb\nc", 3, (["a", "b", "c"], False)),
+        ("x" * 160, 0, (["x" * 75, "x" * 75, "x" * 10], False)),
+        ("x" * 160, 2, (["x" * 75, "x" * 75, "… +1 lines"], True)),
     ],
 )
-def test_format_observation_block(content, max_lines, expected):
-    assert _format_observation_block(content, max_lines) == expected
+def test_observation_rows(content, max_lines, expected):
+    assert _observation_rows(content, max_lines) == expected
 
 
 def test_display_truncation_does_not_reach_the_model(toolcall_config, capsys):

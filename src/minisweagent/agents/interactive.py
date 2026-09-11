@@ -33,12 +33,21 @@ def _format_action_line(command: str) -> str:
     return f"Bash({first_line[:limit]}{ELLIPSIS if rest or len(first_line) > limit else ''})"
 
 
-def _format_observation_block(content: str, max_lines: int) -> str:
-    """Render an observation as an indented result block below its command."""
-    lines = content.splitlines() or ["(No output)"]
-    if 0 < max_lines < len(lines):
-        lines = lines[:max_lines] + [f"{ELLIPSIS} +{len(lines) - max_lines} lines"]
-    return "\n".join([f"  {ELBOW}  {lines[0]}"] + [f"     {line}" for line in lines[1:]])
+def _observation_rows(content: str, max_lines: int) -> tuple[list[str], bool]:
+    """Rows of a result block, and whether any were dropped.
+
+    Long lines are chunked to the terminal width first, so ``max_lines`` bounds the rows
+    that actually end up on screen rather than the newlines in the output.
+    """
+    width = max(console.width - 5, 20)  # the elbow marker and the continuation indent
+    rows = [
+        line[i : i + width] or ""
+        for line in content.splitlines() or ["(No output)"]
+        for i in range(0, max(len(line), 1), width)
+    ]
+    if 0 < max_lines < len(rows):
+        return rows[:max_lines] + [f"{ELLIPSIS} +{len(rows) - max_lines} lines"], True
+    return rows, False
 
 
 class InteractiveAgentConfig(AgentConfig):
@@ -76,11 +85,14 @@ class InteractiveAgent(DefaultAgent):
         extra = msg.get("extra", {})
         content = get_content_string(msg, quiet=self.config.quiet, skip_tool_calls=True)
         if "returncode" in extra:  # command output belongs under the command that produced it
-            console.print(_format_observation_block(content, self.config.observation_display_lines), markup=False)
+            rows, truncated = _observation_rows(content, self.config.observation_display_lines)
+            failed = extra.get("returncode") or extra.get("exception_info")
+            console.print(f"  [{'red' if failed else 'yellow' if truncated else 'green'}]{ELBOW}[/]  ", end="")
+            console.print("\n     ".join(rows), markup=False)
             return
         if (role := msg.get("role") or msg.get("type", "unknown")) == "assistant":
             console.print(
-                f"\n[red]{BULLET}[/red] [bold red]mini-swe-agent[/bold red] "
+                f"\n[green]{BULLET}[/green] [bold green]mini-swe-agent[/bold green] "
                 f"(step [bold]{self.n_calls}[/bold], [bold]${self.cost:.2f}[/bold])"
             )
         else:
