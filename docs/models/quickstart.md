@@ -118,6 +118,36 @@ In newer versions, the location of the config file is printed when you run `mini
 
 Here's a few general examples:
 
+=== "Reasoning effort"
+
+    Set `reasoning_effort` directly on the model as a shortcut for
+    `model_kwargs.reasoning_effort`. The value is passed through to the provider
+    (`drop_params: true` makes litellm silently ignore it for models that do not
+    support it):
+
+    ```yaml
+    model:
+      model_name: "openai/gpt-5-mini"
+      model_kwargs:
+        drop_params: true
+      reasoning_effort: "high"
+    ```
+
+    The same can be set from the command line:
+
+    ```bash
+    mini --reasoning-effort high
+    ```
+
+    An explicit `model_kwargs.reasoning_effort` takes precedence if both are set.
+
+    To set a global default, add it to your `.env` file (the exact location is
+    printed when you run `mini`):
+
+    ```bash
+    MSWEA_REASONING_EFFORT="high"
+    ```
+
 === "Temperature"
 
     `litellm` allows to set model-specific settings with the `model_kwargs` key:

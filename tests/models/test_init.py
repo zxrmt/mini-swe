@@ -127,6 +127,51 @@ class TestGetModel:
             model_kwargs = getattr(model.config, "model_kwargs", {})
             assert "api_key" not in model_kwargs
 
+    def test_reasoning_effort_shortcut_moved_into_model_kwargs(self):
+        """A top-level reasoning_effort is forwarded through model_kwargs for every model class."""
+        config = {"model_class": "litellm", "reasoning_effort": "high", "model_kwargs": {"drop_params": True}}
+        model = get_model("test-model", config)
+        assert model.config.model_kwargs["reasoning_effort"] == "high"
+        # LitellmModelConfig also keeps the top-level value for introspection.
+        assert model.config.reasoning_effort == "high"
+        # The caller's config must not be mutated.
+        assert config == {"model_class": "litellm", "reasoning_effort": "high", "model_kwargs": {"drop_params": True}}
+
+    def test_reasoning_effort_shortcut_does_not_overwrite_model_kwargs(self):
+        """An explicit model_kwargs entry wins, allowing provider-specific overrides."""
+        config = {"model_class": "litellm", "reasoning_effort": "high", "model_kwargs": {"reasoning_effort": "low"}}
+        model = get_model("test-model", config)
+        assert model.config.model_kwargs["reasoning_effort"] == "low"
+
+    def test_reasoning_effort_shortcut_works_for_non_litellm_class(self):
+        """The shortcut is handled centrally, so it also applies to e.g. OpenRouter."""
+        from minisweagent.models.openrouter_model import OpenRouterModel
+
+        model = get_model("@openai/gpt-5", {"model_class": "openrouter", "reasoning_effort": "high"})
+        assert isinstance(model, OpenRouterModel)
+        assert model.config.model_kwargs["reasoning_effort"] == "high"
+
+    def test_reasoning_effort_env_fallback(self):
+        """MSWEA_REASONING_EFFORT provides the effort when the config does not set one."""
+        with patch.dict(os.environ, {"MSWEA_REASONING_EFFORT": "high"}):
+            model = get_model("test-model", {"model_class": "litellm"})
+            assert model.config.model_kwargs["reasoning_effort"] == "high"
+
+    def test_reasoning_effort_config_takes_precedence_over_env(self):
+        """An explicit config effort wins over MSWEA_REASONING_EFFORT."""
+        with patch.dict(os.environ, {"MSWEA_REASONING_EFFORT": "high"}):
+            model = get_model("test-model", {"model_class": "litellm", "reasoning_effort": "low"})
+            assert model.config.model_kwargs["reasoning_effort"] == "low"
+
+    def test_reasoning_effort_env_works_for_non_litellm_class(self):
+        """The env fallback is handled centrally, so it also applies to e.g. OpenRouter."""
+        from minisweagent.models.openrouter_model import OpenRouterModel
+
+        with patch.dict(os.environ, {"MSWEA_REASONING_EFFORT": "high"}):
+            model = get_model("@openai/gpt-5", {"model_class": "openrouter"})
+            assert isinstance(model, OpenRouterModel)
+            assert model.config.model_kwargs["reasoning_effort"] == "high"
+
     def test_get_deterministic_model(self):
         """Test that get_model can instantiate DeterministicModel via model_class parameter."""
         outputs = [make_output("hello", []), make_output("world", [])]

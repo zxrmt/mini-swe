@@ -29,6 +29,8 @@ class LitellmModelConfig(BaseModel):
     """Model name. Highly recommended to include the provider in the model name, e.g., `anthropic/claude-sonnet-4-5-20250929`."""
     model_kwargs: dict[str, Any] = {}
     """Additional arguments passed to the API."""
+    reasoning_effort: str | None = None
+    """Reasoning effort to request from the model (e.g. `"low"`, `"medium"`, `"high"`). Shortcut for `model_kwargs["reasoning_effort"]`; an explicit `model_kwargs` entry takes precedence."""
     litellm_model_registry: Path | str | None = os.getenv("LITELLM_MODEL_REGISTRY_PATH")
     """Model registry for cost tracking and model metadata. See the local model guide (https://mini-swe-agent.com/latest/models/local_models/) for more details."""
     set_cache_control: Literal["default_end"] | None = None
@@ -58,6 +60,9 @@ class LitellmModel:
 
     def __init__(self, *, config_class: Callable = LitellmModelConfig, **kwargs):
         self.config = config_class(**kwargs)
+        if self.config.reasoning_effort is not None:
+            # Keep a single source of truth: forward the shortcut into ``model_kwargs``.
+            self.config.model_kwargs.setdefault("reasoning_effort", self.config.reasoning_effort)
         if self.config.litellm_model_registry and Path(self.config.litellm_model_registry).is_file():
             litellm.utils.register_model(json.loads(Path(self.config.litellm_model_registry).read_text()))
 

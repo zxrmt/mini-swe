@@ -42,6 +42,22 @@ class GlobalModelStats:
 GLOBAL_MODEL_STATS = GlobalModelStats()
 
 
+def get_reasoning_effort(config: dict | None = None) -> str | None:
+    """Resolve the reasoning effort for a model config.
+
+    Precedence: an explicit ``model_kwargs.reasoning_effort``, then the top-level
+    ``reasoning_effort`` shortcut, then the ``MSWEA_REASONING_EFFORT`` environment
+    variable, so the global ``.env`` file can provide a default (just like
+    ``MSWEA_MODEL_NAME``).
+    """
+    config = config or {}
+    return (
+        (config.get("model_kwargs") or {}).get("reasoning_effort")
+        or config.get("reasoning_effort")
+        or os.getenv("MSWEA_REASONING_EFFORT")
+    )
+
+
 def get_model(input_model_name: str | None = None, config: dict | None = None) -> Model:
     """Get an initialized model object from any kind of user input or settings."""
     resolved_model_name = get_model_name(input_model_name, config)
@@ -49,6 +65,16 @@ def get_model(input_model_name: str | None = None, config: dict | None = None) -
         config = {}
     config = copy.deepcopy(config)
     config["model_name"] = resolved_model_name
+
+    # ``reasoning_effort`` can be set as a top-level model key as a shortcut for
+    # ``model_kwargs.reasoning_effort``. Every model class forwards ``model_kwargs``
+    # to its backend, so this works for all of them. An explicit ``model_kwargs``
+    # entry wins, which allows provider-specific overrides.
+    if (reasoning_effort := get_reasoning_effort(config)) is not None:
+        config.setdefault("reasoning_effort", reasoning_effort)
+        model_kwargs = config.get("model_kwargs") or {}
+        model_kwargs.setdefault("reasoning_effort", reasoning_effort)
+        config["model_kwargs"] = model_kwargs
 
     model_class = get_model_class(resolved_model_name, config.pop("model_class", ""))
 

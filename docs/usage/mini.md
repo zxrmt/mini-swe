@@ -22,6 +22,7 @@ Useful switches:
 - `-c`/`--config`: Specify a config file to use, else we will use [`mini.yaml`](https://github.com/swe-agent/mini-swe-agent/blob/main/src/minisweagent/config/mini.yaml) or the config `MSWEA_MINI_CONFIG_PATH` environment variable (see [global configuration](../advanced/global_configuration.md)).
   It's enough to specify the name of the config file, e.g., `-c mini.yaml` (see [global configuration](../advanced/global_configuration.md) for how it is resolved).
 - `-m`/`--model`: Specify a model to use, else we will use the model `MSWEA_MODEL_NAME` environment variable (see [global configuration](../advanced/global_configuration.md))
+- `--reasoning-effort`: Set the model's reasoning effort (e.g. `low`, `medium`, `high`). Equivalent to `model.reasoning_effort` in the config file (see [model settings](../models/quickstart.md)).
 - `-y`/`--yolo`: Start in `yolo` mode (see below)
 - `-r`/`--resume`: Resume an interrupted run from its saved trajectory instead of starting a new task.
   Resumes the `-o`/`--output` file (or a trajectory passed as a positional argument).

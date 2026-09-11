@@ -16,6 +16,17 @@ def strip_ansi_codes(text: str) -> str:
     return ansi_escape.sub("", text)
 
 
+def _render_panel(panel) -> str:
+    """Render a rich renderable to plain text (no ANSI) for assertions."""
+    import io
+
+    from rich.console import Console as RichConsole
+
+    console = RichConsole(file=io.StringIO(), width=200, force_terminal=False)
+    console.print(panel)
+    return console.file.getvalue()
+
+
 def test_import_mini_does_not_load_prompt_toolkit():
     """The interactive prompt dependency should only be imported when prompting is needed."""
     result = subprocess.run(
@@ -240,6 +251,146 @@ def test_mini_with_explicit_model():
         mock_get_agent.assert_called_once()
         # Verify agent.run was called
         mock_agent.run.assert_called_once_with("Test task with explicit model")
+
+
+def test_reasoning_effort_sets_model_config():
+    """`main(reasoning_effort=...)` forwards the value to the model config."""
+    with (
+        patch("minisweagent.run.mini.configure_if_first_time"),
+        patch("minisweagent.run.mini.get_agent", return_value=Mock()),
+        patch("minisweagent.run.mini.get_model") as mock_get_model,
+        patch("minisweagent.run.mini.get_environment", return_value=Mock()),
+        patch("minisweagent.run.mini.get_config_from_spec") as mock_get_config,
+    ):
+        mock_get_config.return_value = {"agent": {}, "env": {}, "model": {}}
+        main(
+            config_spec=[str(DEFAULT_CONFIG_FILE)],
+            model_name="gpt-5",
+            task="Test",
+            yolo=True,
+            output=None,
+            model_class=None,
+            agent_class=None,
+            environment_class=None,
+            reasoning_effort="high",
+        )
+        assert mock_get_model.call_args.kwargs["config"]["reasoning_effort"] == "high"
+
+
+def test_reasoning_effort_flag_via_cli():
+    """`mini --reasoning-effort high` is parsed and reaches the model config."""
+    from typer.testing import CliRunner
+
+    with (
+        patch("minisweagent.run.mini.configure_if_first_time"),
+        patch("minisweagent.run.mini.get_agent", return_value=Mock()),
+        patch("minisweagent.run.mini.get_model") as mock_get_model,
+        patch("minisweagent.run.mini.get_environment", return_value=Mock()),
+    ):
+        result = CliRunner().invoke(
+            app,
+            ["--reasoning-effort", "high", "-m", "gpt-5", "-t", "test", "-c", str(DEFAULT_CONFIG_FILE)],
+        )
+        assert result.exit_code == 0, result.output
+        assert mock_get_model.call_args.kwargs["config"]["reasoning_effort"] == "high"
+
+
+@pytest.mark.parametrize(
+    ("model_config", "expected"),
+    [
+        ({"reasoning_effort": "high"}, "high"),
+        ({"model_kwargs": {"reasoning_effort": "medium"}}, "medium"),
+        ({}, "default"),
+        ({"reasoning_effort": "high", "model_kwargs": {"reasoning_effort": "low"}}, "low"),
+    ],
+)
+def test_welcome_board_displays_reasoning_effort(model_config, expected):
+    """The startup board shows the effective reasoning effort (model_kwargs wins over the shortcut)."""
+    from minisweagent.run.mini import _welcome_board
+
+    output = _render_panel(_welcome_board("gpt-5", ["mini.yaml"], {"mode": "yolo"}, model_config))
+    assert "Reasoning" in output
+    assert expected in output
+
+
+def test_welcome_board_reasoning_effort_defaults_when_model_config_omitted():
+    """The board still renders (showing the provider default) when no model config is passed."""
+    from minisweagent.run.mini import _welcome_board
+
+    output = _render_panel(_welcome_board("gpt-5", ["mini.yaml"], {"mode": "yolo"}))
+    assert "Reasoning" in output
+    assert "default" in output
+
+
+def test_main_passes_reasoning_effort_to_welcome_board():
+    """The reasoning effort set via the CLI reaches the welcome board."""
+    with (
+        patch("minisweagent.run.mini.configure_if_first_time"),
+        patch("minisweagent.run.mini.get_agent", return_value=Mock()),
+        patch("minisweagent.run.mini.get_model", return_value=Mock()),
+        patch("minisweagent.run.mini.get_environment", return_value=Mock()),
+        patch("minisweagent.run.mini.get_config_from_spec", return_value={"agent": {}, "env": {}, "model": {}}),
+        patch("minisweagent.run.mini._welcome_board") as mock_board,
+    ):
+        main(
+            config_spec=[str(DEFAULT_CONFIG_FILE)],
+            model_name="gpt-5",
+            task="Test",
+            yolo=True,
+            output=None,
+            model_class=None,
+            agent_class=None,
+            environment_class=None,
+            reasoning_effort="high",
+        )
+        assert mock_board.call_args.args[3] == {"model_name": "gpt-5", "reasoning_effort": "high"}
+
+
+def test_main_passes_env_reasoning_effort_to_welcome_board(monkeypatch):
+    """MSWEA_REASONING_EFFORT is folded into the config shown by the startup board."""
+    monkeypatch.setenv("MSWEA_REASONING_EFFORT", "high")
+    with (
+        patch("minisweagent.run.mini.configure_if_first_time"),
+        patch("minisweagent.run.mini.get_agent", return_value=Mock()),
+        patch("minisweagent.run.mini.get_model", return_value=Mock()),
+        patch("minisweagent.run.mini.get_environment", return_value=Mock()),
+        patch("minisweagent.run.mini.get_config_from_spec", return_value={"agent": {}, "env": {}, "model": {}}),
+        patch("minisweagent.run.mini._welcome_board") as mock_board,
+    ):
+        main(
+            config_spec=[str(DEFAULT_CONFIG_FILE)],
+            model_name="gpt-5",
+            task="Test",
+            yolo=True,
+            output=None,
+            model_class=None,
+            agent_class=None,
+            environment_class=None,
+        )
+        assert mock_board.call_args.args[3]["reasoning_effort"] == "high"
+
+
+def test_reasoning_effort_env_var_sets_model_config(monkeypatch):
+    """MSWEA_REASONING_EFFORT (e.g. from the global .env file) reaches the model config."""
+    monkeypatch.setenv("MSWEA_REASONING_EFFORT", "high")
+    with (
+        patch("minisweagent.run.mini.configure_if_first_time"),
+        patch("minisweagent.run.mini.get_agent", return_value=Mock()),
+        patch("minisweagent.run.mini.get_model") as mock_get_model,
+        patch("minisweagent.run.mini.get_environment", return_value=Mock()),
+        patch("minisweagent.run.mini.get_config_from_spec", return_value={"agent": {}, "env": {}, "model": {}}),
+    ):
+        main(
+            config_spec=[str(DEFAULT_CONFIG_FILE)],
+            model_name="gpt-5",
+            task="Test",
+            yolo=True,
+            output=None,
+            model_class=None,
+            agent_class=None,
+            environment_class=None,
+        )
+        assert mock_get_model.call_args.kwargs["config"]["reasoning_effort"] == "high"
 
 
 def test_yolo_mode_sets_correct_agent_config():

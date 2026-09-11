@@ -16,7 +16,7 @@ from minisweagent import __version__, global_config_dir
 from minisweagent.agents import get_agent
 from minisweagent.config import builtin_config_dir, get_config_from_spec
 from minisweagent.environments import get_environment
-from minisweagent.models import get_model, get_model_name
+from minisweagent.models import get_model, get_model_name, get_reasoning_effort
 from minisweagent.run.utilities.config import configure_if_first_time
 from minisweagent.utils.serialize import UNSET, recursive_merge
 
@@ -58,14 +58,23 @@ def _multiline_prompt() -> str:
     return prompt()
 
 
-def _welcome_board(model_name: str, config_spec: list[str], agent_config: dict) -> Panel:
-    """What this run is about to do: which model, which configs, which mode."""
-    specs = "\n       ".join(str(spec) for spec in config_spec)
+def _welcome_board(
+    model_name: str, config_spec: list[str], agent_config: dict, model_config: dict | None = None
+) -> Panel:
+    """What this run is about to do: which model, which configs, which mode, which reasoning effort."""
+    specs = "\n          ".join(str(spec) for spec in config_spec)
     mode = agent_config.get("mode", "confirm") + (" (quiet)" if agent_config.get("quiet") else "")
+    model_config = model_config or {}
+    # The effective effort: an explicit model_kwargs entry wins over the top-level shortcut.
+    # `main` folds the MSWEA_REASONING_EFFORT default into ``model_config`` before calling us.
+    reasoning_effort = (model_config.get("model_kwargs") or {}).get("reasoning_effort") or model_config.get(
+        "reasoning_effort"
+    )
     return Panel(
-        f"[bold]Model[/bold]  [green]{model_name}[/green]\n"
-        f"[bold]Config[/bold] {specs}\n"
-        f"[bold]Mode[/bold]   {mode}, cost limit ${agent_config.get('cost_limit', 0.0)}",
+        f"[bold]Model[/bold]     [green]{model_name}[/green]\n"
+        f"[bold]Reasoning[/bold] {reasoning_effort or 'default'}\n"
+        f"[bold]Config[/bold]    {specs}\n"
+        f"[bold]Mode[/bold]      {mode}, cost limit ${agent_config.get('cost_limit', 0.0)}",
         title=f"mini-swe-agent {__version__}",
         title_align="left",
         border_style="green",
@@ -78,6 +87,7 @@ def _welcome_board(model_name: str, config_spec: list[str], agent_config: dict) 
 def main(
     model_name: str | None = typer.Option(None, "-m", "--model", help="Model to use",),
     model_class: str | None = typer.Option(None, "--model-class", help="Model class to use (e.g., 'litellm' or 'minisweagent.models.litellm_model.LitellmModel')", rich_help_panel="Advanced"),
+    reasoning_effort: str | None = typer.Option(None, "--reasoning-effort", help="Reasoning effort passed to the model (e.g. 'low', 'medium', 'high')", rich_help_panel="Model"),
     agent_class: str | None = typer.Option(None, "--agent-class", help="Agent class to use (e.g., 'interactive' or 'minisweagent.agents.interactive.InteractiveAgent')", rich_help_panel="Advanced"),
     environment_class: str | None = typer.Option(None, "--environment-class", help="Environment class to use (e.g., 'local' or 'minisweagent.environments.local.LocalEnvironment')", rich_help_panel="Advanced"),
     task: str | None = typer.Option(None, "-t", "--task", help="Task/problem statement", show_default=False),
@@ -110,12 +120,20 @@ def main(
         "model": {
             "model_class": model_class or UNSET,
             "model_name": model_name or UNSET,
+            "reasoning_effort": reasoning_effort if isinstance(reasoning_effort, str) else UNSET,
         },
         "environment": {
             "environment_class": environment_class or UNSET,
         },
     })
     config = recursive_merge(*configs)
+
+    # `MSWEA_REASONING_EFFORT` (e.g. set in the global .env file) is the fallback
+    # when neither the config files nor the command line set a reasoning effort.
+    model_config = config.setdefault("model", {}) or {}
+    config["model"] = model_config
+    if (effort := get_reasoning_effort(model_config)) is not None:
+        model_config.setdefault("reasoning_effort", effort)
 
     # Resume when asked explicitly (--resume), when a trajectory path is passed (either as
     # `resume` or as the positional `resume_path`). Note that when `main` is called directly in
@@ -151,7 +169,12 @@ def main(
         config.setdefault("agent", {})["output_path"] = resume_file
 
     console.print(
-        _welcome_board(get_model_name(config=config.get("model", {})), config_spec, config.get("agent", {}))
+        _welcome_board(
+            get_model_name(config=config.get("model", {})),
+            config_spec,
+            config.get("agent", {}),
+            config.get("model", {}),
+        )
     )
 
     if resume:
@@ -159,7 +182,7 @@ def main(
         console.print(f"Resuming interrupted run from [bold green]'{resume_file}'[/bold green]")
     elif (run_task := config.get("run", {}).get("task", UNSET)) is UNSET:
         console.print("[bold yellow]What do you want to do?")
-        console.print("[bold yellow]> [/bold yellow]", end="")
+        console.print("[bold yellow]>[/bold yellow] ", end="")
         run_task = _multiline_prompt()
 
     model = get_model(config=config.get("model", {}))

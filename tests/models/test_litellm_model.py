@@ -80,6 +80,29 @@ class TestLitellmModel:
             model.query([{"role": "user", "content": "test"}])
         assert exc.value.messages[0]["content"] == "cut off"
 
+    @patch("minisweagent.models.litellm_model.litellm.completion")
+    @patch("minisweagent.models.litellm_model.litellm.cost_calculator.completion_cost")
+    def test_reasoning_effort_passed_to_api(self, mock_cost, mock_completion):
+        tool_call = MagicMock()
+        tool_call.function.name = "bash"
+        tool_call.function.arguments = '{"command": "echo test"}'
+        tool_call.id = "call_1"
+        mock_completion.return_value = _mock_litellm_response([tool_call])
+        mock_cost.return_value = 0.001
+
+        model = LitellmModel(model_name="gpt-5", reasoning_effort="high")
+        model.query([{"role": "user", "content": "test"}])
+
+        assert mock_completion.call_args.kwargs["reasoning_effort"] == "high"
+
+    def test_reasoning_effort_explicit_model_kwargs_wins(self):
+        model = LitellmModel(model_name="gpt-5", reasoning_effort="high", model_kwargs={"reasoning_effort": "low"})
+        assert model.config.model_kwargs["reasoning_effort"] == "low"
+
+    def test_reasoning_effort_omitted_by_default(self):
+        model = LitellmModel(model_name="gpt-5")
+        assert "reasoning_effort" not in model.config.model_kwargs
+
     def test_format_observation_messages(self):
         model = LitellmModel(model_name="gpt-4", observation_template="{{ output.output }}")
         message = {"extra": {"actions": [{"command": "echo test", "tool_call_id": "call_1"}]}}

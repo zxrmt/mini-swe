@@ -96,7 +96,7 @@ class InteractiveAgent(DefaultAgent):
             return
         if (role := msg.get("role") or msg.get("type", "unknown")) == "assistant":
             task = str(self.extra_template_vars.get("task", ""))[:100]
-            status = escape(f"[step {self.n_calls}] Task >")
+            status = escape(f"[step {self.n_calls}] Current Task >")
             console.print(
                 f"\n[green]{BULLET}[/green] [bold green]{status}[/bold green]"
                 + (f" [dim cyan]{escape(task)}[/]" if task else ""),

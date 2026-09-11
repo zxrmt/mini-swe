@@ -65,6 +65,10 @@ setx KEY "value"
 # Default model name
 # (default: not set)
 MSWEA_MODEL_NAME="anthropic/claude-sonnet-4-5-20250929"
+
+# Default reasoning effort passed to the model (e.g. "low", "medium", "high")
+# (default: provider default)
+MSWEA_REASONING_EFFORT="high"
 ```
 
 To ignore errors from cost tracking checks (for example for free models), set:
