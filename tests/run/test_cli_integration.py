@@ -15,6 +15,23 @@ def strip_ansi_codes(text: str) -> str:
     return ansi_escape.sub("", text)
 
 
+def test_import_mini_does_not_load_prompt_toolkit():
+    """The interactive prompt dependency should only be imported when prompting is needed."""
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            "import sys; import minisweagent.run.mini; "
+            'print(any(name == "prompt_toolkit" or name.startswith("prompt_toolkit.") for name in sys.modules))',
+        ],
+        capture_output=True,
+        text=True,
+        timeout=30,
+        check=True,
+    )
+    assert result.stdout.splitlines()[-1] == "False"
+
+
 def test_configure_if_first_time_called():
     """Test that configure_if_first_time is called when running mini main."""
     with (
@@ -136,6 +153,46 @@ def test_mini_calls_prompt_when_no_task_provided():
         mock_get_agent.assert_called_once()
         # Verify agent.run was called with the task from prompt
         mock_agent.run.assert_called_once_with("User provided task")
+
+
+def test_model_not_loaded_before_task_prompt():
+    """Startup must not pay the model-load cost before asking the user for a task."""
+    with (
+        patch("minisweagent.run.mini.configure_if_first_time"),
+        patch("minisweagent.run.mini._multiline_prompt") as mock_prompt,
+        patch("minisweagent.run.mini.get_agent") as mock_get_agent,
+        patch("minisweagent.run.mini.get_model") as mock_get_model,
+        patch("minisweagent.run.mini.get_environment") as mock_get_env,
+        patch("minisweagent.run.mini.get_config_from_spec") as mock_get_config,
+    ):
+        mock_get_model.return_value = Mock()
+        mock_get_env.return_value = Mock()
+        mock_get_agent.return_value = Mock()
+        mock_get_config.return_value = {"agent": {}, "env": {}, "model": {}}
+
+        prompt_calls = []
+
+        def record_prompt():
+            prompt_calls.append(mock_get_model.called)
+            return "User provided task"
+
+        mock_prompt.side_effect = record_prompt
+
+        main(
+            config_spec=[DEFAULT_CONFIG_FILE],
+            model_name="test-model",
+            task=None,
+            yolo=False,
+            quiet=False,
+            cost_limit=None,
+            output=None,
+            exit_immediately=False,
+            model_class=None,
+            agent_class=None,
+            environment_class=None,
+        )
+
+        assert prompt_calls == [False]
 
 
 def test_mini_with_explicit_model():

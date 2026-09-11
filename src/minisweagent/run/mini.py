@@ -13,10 +13,9 @@ from rich.panel import Panel
 
 from minisweagent import __version__, global_config_dir
 from minisweagent.agents import get_agent
-from minisweagent.agents.utils.prompt_user import _multiline_prompt
 from minisweagent.config import builtin_config_dir, get_config_from_spec
 from minisweagent.environments import get_environment
-from minisweagent.models import get_model
+from minisweagent.models import get_model, get_model_name
 from minisweagent.run.utilities.config import configure_if_first_time
 from minisweagent.utils.serialize import UNSET, recursive_merge
 
@@ -51,6 +50,13 @@ console = Console(highlight=False)
 app = typer.Typer(rich_markup_mode="rich")
 
 
+def _multiline_prompt() -> str:
+    """Load the prompt only when a task actually needs to be requested."""
+    from minisweagent.agents.utils.prompt_user import _multiline_prompt as prompt
+
+    return prompt()
+
+
 def _welcome_board(model_name: str, config_spec: list[str], agent_config: dict) -> Panel:
     """What this run is about to do: which model, which configs, which mode."""
     specs = "\n       ".join(str(spec) for spec in config_spec)
@@ -74,8 +80,8 @@ def main(
     agent_class: str | None = typer.Option(None, "--agent-class", help="Agent class to use (e.g., 'interactive' or 'minisweagent.agents.interactive.InteractiveAgent')", rich_help_panel="Advanced"),
     environment_class: str | None = typer.Option(None, "--environment-class", help="Environment class to use (e.g., 'local' or 'minisweagent.environments.local.LocalEnvironment')", rich_help_panel="Advanced"),
     task: str | None = typer.Option(None, "-t", "--task", help="Task/problem statement", show_default=False),
-    yolo: bool = typer.Option(False, "-y", "--yolo", help="Run without confirmation"),
-    quiet: bool = typer.Option(False, "-q", "--quiet", help="Hide the system prompt and the observation metadata"),
+    yolo: bool = typer.Option(True, "--yolo/--no-yolo", "-y", help="Run without confirmation", show_default=False),
+    quiet: bool = typer.Option(True, "--quiet/--no-quiet", "-q", help="Hide the system prompt and the observation metadata", show_default=False),
     cost_limit: float | None = typer.Option(None, "-l", "--cost-limit", help="Cost limit. Set to 0 to disable."),
     config_spec: list[str] = typer.Option([str(DEFAULT_CONFIG_FILE)], "-c", "--config", help=_CONFIG_SPEC_HELP_TEXT),
     output: Path | None = typer.Option(DEFAULT_OUTPUT_FILE, "-o", "--output", help="Output trajectory file"),
@@ -108,13 +114,15 @@ def main(
     })
     config = recursive_merge(*configs)
 
-    model = get_model(config=config.get("model", {}))
-    console.print(_welcome_board(model.config.model_name, config_spec, config.get("agent", {})))
+    console.print(
+        _welcome_board(get_model_name(config=config.get("model", {})), config_spec, config.get("agent", {}))
+    )
 
     if (run_task := config.get("run", {}).get("task", UNSET)) is UNSET:
         console.print("[bold yellow]What do you want to do?")
         run_task = _multiline_prompt()
 
+    model = get_model(config=config.get("model", {}))
     env = get_environment(config.get("environment", {}), default_type="local")
     agent = get_agent(model, env, config.get("agent", {}), default_type="interactive")
     agent.run(run_task)
