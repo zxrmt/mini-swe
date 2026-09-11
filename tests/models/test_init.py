@@ -172,6 +172,61 @@ class TestGetModel:
             assert isinstance(model, OpenRouterModel)
             assert model.config.model_kwargs["reasoning_effort"] == "high"
 
+    def test_opencode_go_session_header_added(self):
+        """OpenCode Go endpoints get an x-opencode-session header automatically."""
+        with patch.dict(os.environ, {"OPENAI_API_BASE": "https://opencode.ai/zen/go/v1"}, clear=True):
+            model = get_model("openai/deepseek-flash", {"model_class": "litellm"})
+        assert model.config.model_kwargs["extra_headers"]["x-opencode-session"].startswith("mini-swe-agent-")
+
+    @pytest.mark.parametrize(
+        ("env_var", "api_base"),
+        [
+            ("OPENAI_BASE_URL", "https://opencode.ai/zen/go/v1"),
+            ("OPENAI_API_BASE", "https://opencode.ai/zen/go/v1"),
+            ("ANTHROPIC_BASE_URL", "https://opencode.ai/zen/go/v1"),
+        ],
+    )
+    def test_opencode_go_session_header_for_each_base_url_env(self, env_var, api_base):
+        """The header is injected whichever env var litellm reads the Go base URL from."""
+        with patch.dict(os.environ, {env_var: api_base}, clear=True):
+            model = get_model("some-model", {"model_class": "litellm"})
+        assert "x-opencode-session" in model.config.model_kwargs["extra_headers"]
+
+    def test_opencode_go_session_header_from_model_kwargs_api_base(self):
+        """An explicit model_kwargs.api_base pointing at Go also triggers the header."""
+        with patch.dict(os.environ, {}, clear=True):
+            model = get_model(
+                "some-model",
+                {"model_class": "litellm", "model_kwargs": {"api_base": "https://opencode.ai/zen/go/v1"}},
+            )
+        assert "x-opencode-session" in model.config.model_kwargs["extra_headers"]
+
+    @pytest.mark.parametrize(
+        ("env_var", "api_base"),
+        [
+            ("OPENAI_BASE_URL", "https://api.deepseek.com"),
+            ("OPENAI_BASE_URL", "https://opencode.ai/zen/v1"),  # zen, but not the Go router
+            ("ANTHROPIC_BASE_URL", "https://api.anthropic.com"),
+        ],
+    )
+    def test_no_session_header_for_other_providers(self, env_var, api_base):
+        """Regular endpoints must not get the header injected."""
+        with patch.dict(os.environ, {env_var: api_base}, clear=True):
+            model = get_model("openai/some-model", {"model_class": "litellm"})
+        assert "extra_headers" not in model.config.model_kwargs
+
+    def test_opencode_go_user_session_header_wins(self):
+        """A user-provided session header is preserved (e.g. restored when resuming a run)."""
+        with patch.dict(os.environ, {"OPENAI_BASE_URL": "https://opencode.ai/zen/go/v1"}, clear=True):
+            model = get_model(
+                "openai/deepseek-flash",
+                {
+                    "model_class": "litellm",
+                    "model_kwargs": {"extra_headers": {"x-opencode-session": "my-session"}},
+                },
+            )
+        assert model.config.model_kwargs["extra_headers"]["x-opencode-session"] == "my-session"
+
     def test_get_deterministic_model(self):
         """Test that get_model can instantiate DeterministicModel via model_class parameter."""
         outputs = [make_output("hello", []), make_output("world", [])]

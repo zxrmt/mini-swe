@@ -6,6 +6,7 @@ import copy
 import importlib
 import os
 import threading
+import uuid
 
 from minisweagent import Model
 
@@ -75,6 +76,20 @@ def get_model(input_model_name: str | None = None, config: dict | None = None) -
         model_kwargs = config.get("model_kwargs") or {}
         model_kwargs.setdefault("reasoning_effort", reasoning_effort)
         config["model_kwargs"] = model_kwargs
+
+    # OpenCode's Go router (https://opencode.ai/docs/go/) rejects requests that don't carry a
+    # stable `x-opencode-session` header, so inject one per conversation (user value wins).
+    api_base = (
+        (config.get("model_kwargs") or {}).get("api_base")
+        or os.getenv("OPENAI_API_BASE")
+        or os.getenv("OPENAI_BASE_URL")
+        or os.getenv("ANTHROPIC_BASE_URL")
+        or ""
+    )
+    if "opencode.ai" in api_base and "/go" in api_base:
+        config.setdefault("model_kwargs", {}).setdefault("extra_headers", {}).setdefault(
+            "x-opencode-session", f"mini-swe-agent-{uuid.uuid4().hex}"
+        )
 
     model_class = get_model_class(resolved_model_name, config.pop("model_class", ""))
 
