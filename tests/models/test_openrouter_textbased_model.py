@@ -115,7 +115,7 @@ def test_openrouter_model_authentication_error():
 def test_openrouter_model_no_cost_information(mock_response_no_cost):
     """Test error when cost information is missing."""
     with patch.dict(os.environ, {"OPENROUTER_API_KEY": "test-key"}):
-        model = OpenRouterTextbasedModel(model_name="anthropic/claude-3.5-sonnet")
+        model = OpenRouterTextbasedModel(model_name="anthropic/claude-3.5-sonnet", cost_tracking="default")
 
         with patch("requests.post") as mock_post:
             mock_post.return_value.status_code = 200

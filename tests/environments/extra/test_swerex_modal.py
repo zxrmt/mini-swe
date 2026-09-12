@@ -2,6 +2,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+pytest.importorskip("swerex")
+
 from minisweagent.environments.extra.swerex_modal import (
     SwerexModalEnvironment,
     SwerexModalEnvironmentConfig,

@@ -1,5 +1,5 @@
 import re
-from unittest.mock import Mock, patch
+from unittest.mock import patch
 
 import pytest
 
@@ -20,40 +20,6 @@ def _make_model_from_fixture(text_outputs: list[str], cost_per_call: float = 1.0
         cost_per_call=cost_per_call,
         **kwargs,
     )
-
-
-def test_swebench_single_cost_limit_zero_is_preserved():
-    """Test that an explicit cost_limit=0 is not dropped during config merge."""
-    with (
-        patch(
-            "minisweagent.run.benchmarks.swebench_single.load_dataset",
-            return_value=[{"instance_id": "instance", "problem_statement": "test"}],
-        ),
-        patch("minisweagent.run.benchmarks.swebench_single.get_sb_environment") as mock_get_env,
-        patch("minisweagent.run.benchmarks.swebench_single.get_model") as mock_get_model,
-        patch("minisweagent.run.benchmarks.swebench_single.get_agent") as mock_get_agent,
-        patch("minisweagent.run.benchmarks.swebench_single.get_config_from_spec", return_value={}),
-    ):
-        mock_get_model.return_value = object()
-        mock_get_env.return_value = object()
-        mock_get_agent.return_value = Mock()
-
-        main(
-            subset="_test",
-            split="test",
-            instance_spec="0",
-            model_name="deterministic",
-            config_spec=[str(package_dir / "config" / "benchmarks" / "swebench.yaml")],
-            environment_class="docker",
-            exit_immediately=False,
-            output=None,
-            model_class=None,
-            agent_class=None,
-            yolo=False,
-            cost_limit=0,
-        )
-
-        assert mock_get_agent.call_args.args[2]["cost_limit"] == 0
 
 
 @pytest.mark.slow
@@ -88,7 +54,6 @@ def test_swebench_single_end_to_end(github_test_data, tmp_path, container_execut
             model_class=None,
             agent_class=None,
             yolo=False,
-            cost_limit=None,
         )
 
         # Verify model was called with correct parameters
@@ -129,7 +94,6 @@ def test_swebench_single_end_to_end_exit_immediately(github_test_data, tmp_path,
             model_class=None,
             agent_class=None,
             yolo=False,
-            cost_limit=None,
         )
 
         # Verify model was called with correct parameters

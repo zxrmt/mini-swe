@@ -12,7 +12,7 @@ def is_singularity_available():
     try:
         subprocess.run(["singularity", "version"], capture_output=True, check=True, timeout=5)
         return True
-    except (subprocess.CalledProcessError, FileNotFoundError, subprocess.TimeoutExpired):
+    except (subprocess.CalledProcessError, FileNotFoundError, PermissionError, subprocess.TimeoutExpired):
         return False
 
 

@@ -54,8 +54,6 @@ def run_mini_command(extra_options: list[str]) -> subprocess.CompletedProcess:
         "minisweagent",
         "--exit-immediately",
         "-y",
-        "--cost-limit",
-        "0.03",
         "-t",
         SIMPLE_TASK,
         *extra_options,

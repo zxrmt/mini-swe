@@ -46,7 +46,7 @@ def _get_container_executable() -> str | None:
         try:
             subprocess.run([exe, "version"], capture_output=True, check=True, timeout=5)
             return exe
-        except (subprocess.CalledProcessError, FileNotFoundError, subprocess.TimeoutExpired):
+        except (subprocess.CalledProcessError, FileNotFoundError, PermissionError, subprocess.TimeoutExpired):
             continue
     return None
 

@@ -211,6 +211,7 @@ def test_openrouter_response_model_format_error_persists_response() -> None:
 
 def test_portkey_model_format_error_persists_response(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("PORTKEY_API_KEY", "test-key")
+    pytest.importorskip("portkey_ai")
     from minisweagent.models.portkey_model import PortkeyModel
 
     response = MagicMock()
@@ -246,6 +247,7 @@ def test_portkey_response_model_format_error_persists_response_with_model_dump(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setenv("PORTKEY_API_KEY", "test-key")
+    pytest.importorskip("portkey_ai")
     from minisweagent.models.portkey_response_model import PortkeyResponseAPIModel
 
     response = MagicMock()
@@ -477,6 +479,7 @@ def test_portkey_model_format_error_not_swallowed_when_model_dump_raises(
     the original FormatError must still propagate AND extra['response'] must be
     set to repr(response) — the repr fallback holds for PortkeyModel."""
     monkeypatch.setenv("PORTKEY_API_KEY", "test-key")
+    pytest.importorskip("portkey_ai")
     from minisweagent.models.portkey_model import PortkeyModel
 
     response = MagicMock()
@@ -507,6 +510,7 @@ def test_portkey_response_model_format_error_not_swallowed_when_model_dump_raise
     the original FormatError must still propagate AND extra['response'] must be
     set to repr(response) — the repr fallback holds for PortkeyResponseAPIModel."""
     monkeypatch.setenv("PORTKEY_API_KEY", "test-key")
+    pytest.importorskip("portkey_ai")
     from minisweagent.models.portkey_response_model import PortkeyResponseAPIModel
 
     response = MagicMock()

@@ -108,7 +108,7 @@ def test_litellm_model_cost_tracking_ignore_errors():
 
 def test_litellm_model_cost_validation_zero_cost():
     """Test that zero cost raises error when cost tracking is enabled."""
-    model = LitellmTextbasedModel(model_name="gpt-4o")
+    model = LitellmTextbasedModel(model_name="gpt-4o", cost_tracking="default")
 
     with patch("litellm.completion") as mock_completion:
         mock_response = Mock()

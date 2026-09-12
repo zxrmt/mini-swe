@@ -2,6 +2,8 @@ import subprocess
 
 import pytest
 
+pytest.importorskip("swerex")
+
 from minisweagent.environments.extra.swerex_docker import SwerexDockerEnvironment
 
 

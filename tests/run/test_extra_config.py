@@ -209,12 +209,12 @@ class TestConfigSet:
         with patch("minisweagent.run.utilities.config.global_config_file", config_file):
             set("MSWEA_MODEL_NAME", "gpt-4")
             set("OPENAI_API_KEY", "sk-openai-test")
-            set("MSWEA_GLOBAL_COST_LIMIT", "10.00")
+            set("MSWEA_GLOBAL_CALL_LIMIT", "10")
 
             content = config_file.read_text()
             assert "MSWEA_MODEL_NAME='gpt-4'" in content
             assert "OPENAI_API_KEY='sk-openai-test'" in content
-            assert "MSWEA_GLOBAL_COST_LIMIT='10.00'" in content
+            assert "MSWEA_GLOBAL_CALL_LIMIT='10'" in content
 
     def test_set_overwrites_existing_key(self, tmp_path):
         """Test that setting a key overwrites existing value."""

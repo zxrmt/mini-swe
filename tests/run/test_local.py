@@ -43,7 +43,6 @@ def test_local_end_to_end(local_test_data):
             quiet=False,
             task="Blah blah blah",
             output=None,
-            cost_limit=10,
             model_class=None,
             agent_class=None,
             environment_class=None,
