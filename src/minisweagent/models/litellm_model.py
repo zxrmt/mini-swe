@@ -3,6 +3,7 @@ import logging
 import os
 import time
 from collections.abc import Callable
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Literal
 
@@ -22,6 +23,17 @@ from minisweagent.models.utils.openai_multimodal import expand_multimodal_conten
 from minisweagent.models.utils.retry import retry
 
 logger = logging.getLogger("litellm_model")
+
+
+@contextmanager
+def _suppress_litellm_debug_info():
+    """litellm prints provider hints for models that are not in its built-in cost map."""
+    previous = litellm.suppress_debug_info
+    litellm.suppress_debug_info = True
+    try:
+        yield
+    finally:
+        litellm.suppress_debug_info = previous
 
 
 class LitellmModelConfig(BaseModel):
@@ -64,7 +76,8 @@ class LitellmModel:
             # Keep a single source of truth: forward the shortcut into ``model_kwargs``.
             self.config.model_kwargs.setdefault("reasoning_effort", self.config.reasoning_effort)
         if self.config.litellm_model_registry and Path(self.config.litellm_model_registry).is_file():
-            litellm.utils.register_model(json.loads(Path(self.config.litellm_model_registry).read_text()))
+            with _suppress_litellm_debug_info():
+                litellm.utils.register_model(json.loads(Path(self.config.litellm_model_registry).read_text()))
 
     def _query(self, messages: list[dict[str, str]], **kwargs):
         try:
