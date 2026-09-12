@@ -8,6 +8,7 @@ There are three modes:
 
 import re
 import sys
+import time
 from typing import Literal, NoReturn
 
 from rich.console import Console
@@ -16,7 +17,7 @@ from rich.rule import Rule
 
 from minisweagent.agents.default import AgentConfig, DefaultAgent
 from minisweagent.agents.utils.prompt_user import _multiline_prompt, prompt_session
-from minisweagent.exceptions import LimitsExceeded, Submitted, TimeExceeded, UserInterruption
+from minisweagent.exceptions import InterruptAgentFlow, LimitsExceeded, Submitted, TimeExceeded, UserInterruption
 from minisweagent.models.utils.content_string import get_content_string, get_reasoning_string
 
 console = Console(highlight=False)
@@ -25,6 +26,14 @@ console = Console(highlight=False)
 BULLET, ELBOW, ELLIPSIS = (
     ("●", "⎿", "…") if (sys.stdout.encoding or "").lower().replace("-", "").startswith("utf") else ("*", "\\_", "...")
 )
+
+
+class NewConversation(InterruptAgentFlow):
+    """Raised to discard the current conversation and start a fresh one with a new task."""
+
+    def __init__(self, task: str):
+        self.task = task
+        super().__init__()
 
 
 def _format_action_line(command: str) -> str:
@@ -162,16 +171,21 @@ class InteractiveAgent(DefaultAgent):
             return False
 
     def step(self) -> list[dict]:
-        # Override the step method to handle user interruption
+        # Override the step method to handle user interruption and new conversations
         try:
             console.print(Rule())
             return super().step()
+        except NewConversation as e:
+            return self._start_new_conversation(e.task)
         except KeyboardInterrupt:
-            interruption_message = self._prompt_and_handle_slash_commands(
-                "\n\n[bold yellow]Interrupted.[/bold yellow] "
-                "[green]Type a comment/command[/green] (/h for available commands)"
-                "\n[bold yellow]>[/bold yellow] "
-            ).strip()
+            try:
+                interruption_message = self._prompt_and_handle_slash_commands(
+                    "\n\n[bold yellow]Interrupted.[/bold yellow] "
+                    "[green]Type a comment/command[/green] (/h for available commands)"
+                    "\n[bold yellow]>[/bold yellow] "
+                ).strip()
+            except NewConversation as e:
+                return self._start_new_conversation(e.task)
             if not interruption_message or interruption_message in self._MODE_COMMANDS_MAPPING:
                 interruption_message = "Temporary interruption caught."
             self._interrupt(f"Interrupted by user: {interruption_message}")
@@ -201,6 +215,19 @@ class InteractiveAgent(DefaultAgent):
 
     def _add_observation_messages(self, message: dict, outputs: list[dict]) -> list[dict]:
         return self.add_messages(*self.model.format_observation_messages(message, outputs, self.get_template_vars()))
+
+    def _start_new_conversation(self, task: str) -> list[dict]:
+        """Discard the current conversation and begin a fresh one for ``task``."""
+        self.messages = []
+        self.cost = 0.0
+        self.n_calls = 0
+        self.n_consecutive_format_errors = 0
+        self.extra_template_vars = {"task": task}
+        self._start_time = time.time()
+        return self.add_messages(
+            self.model.format_message(role="system", content=self._render_template(self.config.system_template)),
+            self.model.format_message(role="user", content=self._render_template(self.config.instance_template)),
+        )
 
     def _check_for_new_task_or_submit(self, e: Submitted) -> None:
         """Ask the user whether to add a new task (the submission has already been recorded and shown)."""
@@ -255,9 +282,18 @@ class InteractiveAgent(DefaultAgent):
                 f"[bold green]/y[/bold green] to switch to [bold yellow]yolo[/bold yellow] mode (execute LM commands without confirmation)\n"
                 f"[bold green]/c[/bold green] to switch to [bold yellow]confirmation[/bold yellow] mode (ask for confirmation before executing LM commands)\n"
                 f"[bold green]/u[/bold green] to switch to [bold yellow]human[/bold yellow] mode (execute commands issued by the user)\n"
-                f"[bold green]/m[/bold green] to enter multiline comment",
+                f"[bold green]/m[/bold green] to enter multiline comment\n"
+                f"[bold green]/new[/bold green] to start a new conversation (discards the current history)",
             )
             return self._prompt_and_handle_slash_commands(prompt)
+        if user_input == "/new" or user_input.startswith("/new "):
+            task = user_input[len("/new") :].strip()
+            console.print("[bold green]Starting a new conversation.[/bold green]")
+            if not task:
+                console.print("[bold yellow]What do you want to do?[/bold yellow]")
+                console.print("[bold yellow]>[/bold yellow] ", end="")
+                task = _multiline_prompt()
+            raise NewConversation(task)
         if user_input in self._MODE_COMMANDS_MAPPING:
             if self.config.mode == self._MODE_COMMANDS_MAPPING[user_input]:
                 return self._prompt_and_handle_slash_commands(

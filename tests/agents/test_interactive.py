@@ -1340,3 +1340,176 @@ def test_submission_is_shown_before_asking_for_a_new_task(toolcall_config, capsy
     assert info["submission"] == "THE FINAL ANSWER\n"
     assert "THE FINAL ANSWER" in output
     assert output.index("THE FINAL ANSWER") < output.index("Task Completed")
+
+
+# --- /new: starting a new conversation ---
+
+
+def test_new_conversation_from_completion_prompt(model_factory):
+    """`/new` at the completion prompt discards the history and starts fresh."""
+    factory, config = model_factory
+    with mock_prompts(
+        [
+            "",  # Confirm first action
+            "/new",  # Start a new conversation
+            "Brand new task",  # The new task prompted by /new
+            "",  # Confirm the new conversation's action
+            "",  # No further task after the new conversation completes
+        ]
+    ):
+        agent = InteractiveAgent(
+            model=factory(
+                [
+                    ("First", [{"command": "echo 'COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT'\necho 'first done'"}]),
+                    ("Second", [{"command": "echo 'COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT'\necho 'second done'"}]),
+                ]
+            ),
+            env=LocalEnvironment(),
+            **config,
+        )
+        info = agent.run("Original task")
+
+    assert info["exit_status"] == "Submitted"
+    assert info["submission"] == "second done\n"
+    # The counters restart for the new conversation.
+    assert agent.n_calls == 1
+    contents = [get_text(msg) for msg in agent.messages]
+    # The old conversation is gone...
+    assert not any("Original task" in c for c in contents)
+    assert not any("first done" in c for c in contents)
+    # ...and the fresh conversation is present.
+    assert any("Brand new task" in c for c in contents)
+    # A new conversation is not a continuation of the old one.
+    assert not any("The user added a new task" in c for c in contents)
+
+
+def test_new_conversation_from_confirmation_prompt(model_factory):
+    """`/new` can abandon a pending action and start a fresh conversation."""
+    factory, config = model_factory
+    with mock_prompts(
+        [
+            "/new",  # At the confirmation prompt: abandon and start over
+            "Fresh task",  # The new task
+            "",  # Confirm the fresh task's action
+            "",  # No further task
+        ]
+    ):
+        agent = InteractiveAgent(
+            model=factory(
+                [
+                    ("First", [{"command": "echo 'COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT'\necho 'first done'"}]),
+                    ("Second", [{"command": "echo 'COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT'\necho 'fresh done'"}]),
+                ]
+            ),
+            env=LocalEnvironment(),
+            **config,
+        )
+        info = agent.run("Original task")
+
+    assert info["exit_status"] == "Submitted"
+    assert info["submission"] == "fresh done\n"
+    contents = [get_text(msg) for msg in agent.messages]
+    assert not any("Original task" in c for c in contents)
+    assert not any("first done" in c for c in contents)
+    assert any("Fresh task" in c for c in contents)
+
+
+def test_new_conversation_with_inline_task(model_factory):
+    """The task for the new conversation can be given on the same line as `/new`."""
+    factory, config = model_factory
+    with mock_prompts(
+        [
+            "",  # Confirm first action
+            "/new Inline task",  # Start a new conversation with an inline task
+            "",  # Confirm the new action
+            "",  # No further task
+        ]
+    ):
+        agent = InteractiveAgent(
+            model=factory(
+                [
+                    ("First", [{"command": "echo 'COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT'\necho 'first done'"}]),
+                    ("Second", [{"command": "echo 'COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT'\necho 'inline done'"}]),
+                ]
+            ),
+            env=LocalEnvironment(),
+            **config,
+        )
+        info = agent.run("Original task")
+
+    assert info["submission"] == "inline done\n"
+    assert any("Inline task" in get_text(msg) for msg in agent.messages)
+    assert not any("Original task" in get_text(msg) for msg in agent.messages)
+
+
+def test_new_conversation_in_human_mode(model_factory):
+    """In human mode `/new` resets the conversation before the user takes over."""
+    factory, config = model_factory
+    with mock_prompts(
+        [
+            "/new",  # Human prompt: start fresh
+            "Human mode task",  # The new task
+            "echo 'COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT'\necho 'human done'",  # Human command submits
+            "",  # No further task
+        ]
+    ):
+        agent = InteractiveAgent(model=factory([]), env=LocalEnvironment(), **{**config, "mode": "human"})
+        info = agent.run("Original task")
+
+    assert info["exit_status"] == "Submitted"
+    assert info["submission"] == "human done\n"
+    assert not any("Original task" in get_text(msg) for msg in agent.messages)
+    assert any("Human mode task" in get_text(msg) for msg in agent.messages)
+
+
+def test_help_command_lists_new(model_factory):
+    """The help text advertises the /new command."""
+    factory, config = model_factory
+    with mock_prompts(["/h", "", ""]):
+        with patch("minisweagent.agents.interactive.console.print") as mock_print:
+            agent = InteractiveAgent(
+                model=factory(
+                    [("Finishing", [{"command": "echo 'COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT'\necho 'done'"}])]
+                ),
+                env=LocalEnvironment(),
+                **config,
+            )
+            agent.run("Test help lists /new")
+    assert any("/new" in str(call) for call in mock_print.call_args_list)
+
+
+def test_new_conversation_after_keyboard_interrupt(model_factory):
+    """`/new` entered after Ctrl+C still resets to a fresh conversation."""
+    factory, config = model_factory
+    agent = InteractiveAgent(
+        model=factory(
+            [
+                ("Finishing", [{"command": "echo 'COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT'\necho 'after interrupt'"}]),
+            ]
+        ),
+        env=LocalEnvironment(),
+        **{**config, "mode": "yolo"},
+    )
+    original_query = agent.query
+    calls = {"n": 0}
+
+    def query():
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise KeyboardInterrupt
+        return original_query()
+
+    agent.query = query
+    with mock_prompts(
+        [
+            "/new",  # After Ctrl+C: start a new conversation
+            "Interrupted new task",  # The new task
+            "",  # No further task after completion
+        ]
+    ):
+        info = agent.run("Original task")
+
+    assert info["exit_status"] == "Submitted"
+    assert info["submission"] == "after interrupt\n"
+    assert not any("Original task" in get_text(msg) for msg in agent.messages)
+    assert any("Interrupted new task" in get_text(msg) for msg in agent.messages)
