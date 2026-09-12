@@ -186,6 +186,36 @@ class InteractiveAgent(DefaultAgent):
             self._print_message(msg)
         return super().add_messages(*messages)
 
+    @staticmethod
+    def _format_token_count(n: int) -> str:
+        """Compact human-readable token count, e.g. ``832``, ``12.3k``, ``1.2M``."""
+        if n >= 1_000_000:
+            return f"{n / 1_000_000:.1f}M"
+        if n >= 1_000:
+            return f"{n / 1_000:.1f}k"
+        return str(n)
+
+    def _context_tokens(self, msg: dict) -> int | None:
+        """Best-effort size of the current context (in tokens) for the status line.
+
+        Prefers the provider-reported usage of the call that produced ``msg`` (authoritative
+        and cheap). Falls back to counting the message history for providers that do not
+        report usage. Returns ``None`` when neither is available.
+        """
+        usage = (msg.get("extra") or {}).get("response", {}).get("usage") or {}
+        total = usage.get("total_tokens") or (usage.get("prompt_tokens") or 0) + (usage.get("completion_tokens") or 0)
+        if total:
+            return int(total)
+        try:
+            import litellm
+
+            from minisweagent.models.utils.actions_toolcall import BASH_TOOL
+
+            messages = [{k: v for k, v in m.items() if k != "extra"} for m in self.messages]
+            return int(litellm.token_counter(model=self.model.config.model_name, messages=messages, tools=[BASH_TOOL]))
+        except Exception:
+            return None
+
     def _print_message(self, msg: dict) -> None:
         extra = msg.get("extra", {})
         reasoning = get_reasoning_string(msg)
@@ -198,12 +228,15 @@ class InteractiveAgent(DefaultAgent):
             return
         if (role := msg.get("role") or msg.get("type", "unknown")) == "assistant":
             task = str(self.extra_template_vars.get("task", ""))[:100]
-            status = escape(f"[step {self.n_calls}] Current Task >")
-            console.print(
-                f"\n[green]{BULLET}[/green] [bold green]{status}[/bold green]"
-                + (f" [dim cyan]{escape(task)}[/]" if task else ""),
-                soft_wrap=True,
-            )
+            context = self._context_tokens(msg)
+            headline = escape(f"[step {self.n_calls}] Current Task >")
+            parts = [f"[green]{BULLET}[/green]"]
+            if context is not None:
+                parts.append(f"[bold green]{escape(f'[{self._format_token_count(context)} ctx]')}[/bold green]")
+            parts.append(f"[bold green]{headline}[/bold green]")
+            if task:
+                parts.append(f"[dim cyan]{escape(task)}[/]")
+            console.print("\n" + " ".join(parts), soft_wrap=True)
         else:
             console.print(f"\n[bold green]{BULLET}[/bold green] [bold green]{role.capitalize()}[/bold green]")
         if reasoning:

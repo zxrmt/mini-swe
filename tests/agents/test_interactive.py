@@ -1742,3 +1742,71 @@ def test_help_command_lists_resume(model_factory):
             )
             agent.run("Test help lists /resume")
     assert any("/resume" in str(call) for call in mock_print.call_args_list)
+
+
+def test_status_line_shows_context_size(toolcall_config):
+    """The `[step N] Current Task >` line is prefixed with the current context size."""
+    with mock_prompts(["", ""]):
+        agent = InteractiveAgent(
+            model=make_tc_model(
+                [("First", [{"command": "echo 'COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT'\necho 'done'"}])]
+            ),
+            env=LocalEnvironment(),
+            **toolcall_config,
+        )
+        with patch("minisweagent.agents.interactive.console.print") as mock_print:
+            agent.run("Context size test")
+    printed = " ".join(str(call) for call in mock_print.call_args_list)
+    assert "Current Task >" in printed
+    assert "ctx]" in printed
+
+
+def test_context_tokens_prefers_provider_usage():
+    """When the provider reports usage, that value is used directly (no counting)."""
+    agent = InteractiveAgent.__new__(InteractiveAgent)
+    msg = {
+        "role": "assistant",
+        "content": "x",
+        "extra": {"response": {"usage": {"prompt_tokens": 1500, "completion_tokens": 25, "total_tokens": 1525}}},
+    }
+    assert agent._context_tokens(msg) == 1525
+    assert (
+        agent._context_tokens(
+            {"role": "assistant", "extra": {"response": {"usage": {"prompt_tokens": 42, "completion_tokens": 8}}}}
+        )
+        == 50
+    )
+
+
+def test_context_tokens_falls_back_to_counting():
+    """Providers that do not report usage fall back to counting the message history."""
+
+    class FakeModel:
+        class config:
+            model_name = "gpt-4o"
+
+    agent = InteractiveAgent.__new__(InteractiveAgent)
+    agent.messages = [{"role": "user", "content": "hello world"}]
+    agent.model = FakeModel()
+    n = agent._context_tokens({"role": "assistant", "content": "x", "extra": {}})
+    assert isinstance(n, int) and n > 0
+
+
+def test_context_tokens_returns_none_when_uncountable():
+    """If usage is missing and counting fails, the status line just omits the size."""
+
+    class FakeModel:
+        class config:
+            model_name = "gpt-4o"
+
+    agent = InteractiveAgent.__new__(InteractiveAgent)
+    agent.messages = [{"role": "user", "content": "hello"}]
+    agent.model = FakeModel()
+    with patch("litellm.token_counter", side_effect=RuntimeError("nope")):
+        assert agent._context_tokens({"role": "assistant", "content": "x", "extra": {}}) is None
+
+
+def test_format_token_count():
+    assert InteractiveAgent._format_token_count(832) == "832"
+    assert InteractiveAgent._format_token_count(12_345) == "12.3k"
+    assert InteractiveAgent._format_token_count(1_234_567) == "1.2M"
