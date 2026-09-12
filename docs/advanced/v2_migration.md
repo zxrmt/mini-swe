@@ -58,7 +58,6 @@ agent:
   system_template: "..."
   instance_template: "..."
   step_limit: 0
-  cost_limit: 3.
 environment:
   cwd: "..."
   timeout: 30
@@ -223,7 +222,7 @@ All flow control exceptions now inherit from `InterruptAgentFlow` and moved to `
 ```python
 InterruptAgentFlow (base)
 ├── Submitted (task completed)
-├── LimitsExceeded (cost/step limit)
+├── LimitsExceeded (step/time limit)
 ├── FormatError (invalid model output)
 └── UserInterruption (user cancelled)  # new
 ```

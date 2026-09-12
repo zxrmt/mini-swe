@@ -29,7 +29,7 @@ flowchart TD
         S1["<b><code>Agent.query</code></b>"] --> S2["<b><code>Agent.execute_actions</code></b>"]
     end
 
-    subgraph query["<b><code>Agent.query()</code></b><br>Also checks for cost limits</br><br></br>"]
+    subgraph query["<b><code>Agent.query()</code></b><br>Also checks for step limits</br><br></br>"]
         direction TB
         Q3["<b><code>Model.query</code></b>"] --> Q4["<b><code>Agent.add_messages</code></b>"]
     end
@@ -103,7 +103,7 @@ This uses exceptions that inherit from `InterruptAgentFlow`. All these exception
             raise Submitted({"role": "exit", "content": ..., "extra": {...}})
     ```
 
-- `LimitsExceeded` is raised when we hit a cost or step limit
+- `LimitsExceeded` is raised when we hit a step or wall-clock time limit
 - `FormatError` is raised when the output from the LM is not in the expected format
 - `TimeoutError` is raised when the action took too long to execute
 - `UserInterruption` is raised when the user interrupts the agent

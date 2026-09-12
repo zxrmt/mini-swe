@@ -110,7 +110,6 @@ agent:
     </CRITICAL>
     </instructions>
   step_limit: 250
-  cost_limit: 3.
 
 environment:
   cwd: "/testbed"

@@ -136,9 +136,9 @@
 
 ## FAQ
 
-> Can I set global cost limits?
+> Can I set a global call limit?
 
-Yes, you can set global cost limits with the `MSWEA_GLOBAL_CALL_LIMIT` and `MSWEA_GLOBAL_COST_LIMIT` environment variables/global config.
+Yes, you can set a global limit on the number of model calls with the `MSWEA_GLOBAL_CALL_LIMIT` environment variable/global config.
 See [global configuration](../advanced/global_configuration.md) for more details.
 
 > What happens to uncompleted tasks when I abort with KeyboardInterrupt?

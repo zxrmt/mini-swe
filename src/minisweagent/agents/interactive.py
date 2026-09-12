@@ -129,7 +129,7 @@ class InteractiveAgent(DefaultAgent):
             with console.status("Waiting for the LM to respond..."):
                 return super().query()
         except TimeExceeded:
-            # A wall-clock limit can't be lifted by raising the step/cost limits
+            # A wall-clock limit can't be lifted by raising the step limit
             # (the next query re-checks the clock and raises again), so prompting
             # would loop forever. Always stop cleanly instead.
             raise
@@ -142,11 +142,10 @@ class InteractiveAgent(DefaultAgent):
                 # reading input.
                 raise
             console.print(
-                f"Limits exceeded. Limits: {self.config.step_limit} steps, ${self.config.cost_limit}.\n"
+                f"Limits exceeded. Limits: {self.config.step_limit} steps.\n"
                 f"Current spend: {self.n_calls} steps, ${self.cost:.2f}."
             )
             self.config.step_limit = int(input("New step limit: "))
-            self.config.cost_limit = float(input("New cost limit: "))
             return super().query()
 
     @staticmethod

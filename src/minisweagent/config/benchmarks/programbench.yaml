@@ -179,7 +179,6 @@ agent:
     anything
     ```
   step_limit: 1000
-  cost_limit: 0
 environment:
   cwd: "/workspace"
   timeout: 180

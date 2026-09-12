@@ -19,7 +19,7 @@ Configuration files look like this:
 
 We use the following top-level keys:
 
-- `agent`: Agent configuration (prompt templates, cost limits etc.)
+- `agent`: Agent configuration (prompt templates, step limits etc.)
 - `environment`: Environment configuration (if you want to run in a docker container, etc.)
 - `model`: Model configuration (model name, reasoning strength, etc.)
 - `run`: Run configuration (output file, etc.)
@@ -78,7 +78,7 @@ However, you can also do fairly complicated logic like this directly from your t
 In all builtin agents, you can use the following variables:
 
 - Environment variables (`LocalEnvironment` only, see discussion [here](https://github.com/SWE-agent/mini-swe-agent/pull/425))
-- Agent config variables (i.e., anything that was set in the `agent` section of the config file, e.g., `step_limit`, `cost_limit`, etc.)
+- Agent config variables (i.e., anything that was set in the `agent` section of the config file, e.g., `step_limit`, `wall_time_limit_seconds`, etc.)
 - Environment config variables (i.e., anything that was set in the `environment` section of the config file, e.g., `cwd`, `timeout`, etc.)
 - Variables passed to the `run` method of the agent (by default that's only `task`, but you can pass other variables if you want to)
 - Output of the last action execution (i.e., `output` from the `execute_action` method)

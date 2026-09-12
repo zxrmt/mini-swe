@@ -84,16 +84,12 @@ To register extra models to litellm (see [local models](../models/local_models.m
 LITELLM_MODEL_REGISTRY_PATH="/path/to/your/model/registry.json"
 ```
 
-Global cost limits:
+Global call limit:
 
 ```bash
 # Global limit on number of model calls (0 = no limit)
 # (default: 0)
 MSWEA_GLOBAL_CALL_LIMIT="100"
-
-# Global cost limit in dollars (0 = no limit)
-# (default: 0)
-MSWEA_GLOBAL_COST_LIMIT="10.00"
 
 # Number of retry attempts for model API calls
 # (default: 10)

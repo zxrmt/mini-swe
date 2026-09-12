@@ -25,8 +25,6 @@ class AgentConfig(BaseModel):
     """Template for the first user message specifying the task (the second message overall)."""
     step_limit: int = 0
     """Maximum number of steps the agent can take."""
-    cost_limit: float = 3.0
-    """Stop agent after exceeding (!) this cost."""
     wall_time_limit_seconds: int = 0
     """Stop agent after this many seconds of wall-clock time. 0 means no limit."""
     max_consecutive_format_errors: int = 3
@@ -161,7 +159,7 @@ class DefaultAgent:
 
     def query(self) -> dict:
         """Query the model and return model messages. Override to add hooks."""
-        if 0 < self.config.step_limit <= self.n_calls or 0 < self.config.cost_limit <= self.cost:
+        if 0 < self.config.step_limit <= self.n_calls:
             raise LimitsExceeded(
                 {
                     "role": "exit",

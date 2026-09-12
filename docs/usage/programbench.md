@@ -78,7 +78,7 @@
 
 ## FAQ
 
-See the [SWE-bench FAQ](swebench.md#faq) — most entries (cost limits, KeyboardInterrupt behavior,
+See the [SWE-bench FAQ](swebench.md#faq) — most entries (global call limit, KeyboardInterrupt behavior,
 docker troubleshooting, singularity backend) apply equally to ProgramBench.
 
 ## Implementation

@@ -74,7 +74,7 @@ def _welcome_board(
         f"[bold]Model[/bold]     [green]{model_name}[/green]\n"
         f"[bold]Reasoning[/bold] {reasoning_effort or 'default'}\n"
         f"[bold]Config[/bold]    {specs}\n"
-        f"[bold]Mode[/bold]      {mode}, cost limit ${agent_config.get('cost_limit', 0.0)}",
+        f"[bold]Mode[/bold]      {mode}",
         title=f"mini-swe-agent {__version__}",
         title_align="left",
         border_style="green",
@@ -93,7 +93,6 @@ def main(
     task: str | None = typer.Option(None, "-t", "--task", help="Task/problem statement", show_default=False),
     yolo: bool = typer.Option(True, "--yolo/--no-yolo", "-y", help="Run without confirmation", show_default=False),
     quiet: bool = typer.Option(True, "--quiet/--no-quiet", "-q", help="Hide the system prompt and the observation metadata", show_default=False),
-    cost_limit: float | None = typer.Option(None, "-l", "--cost-limit", help="Cost limit. Set to 0 to disable."),
     config_spec: list[str] = typer.Option([str(DEFAULT_CONFIG_FILE)], "-c", "--config", help=_CONFIG_SPEC_HELP_TEXT),
     output: Path | None = typer.Option(DEFAULT_OUTPUT_FILE, "-o", "--output", help="Output trajectory file"),
     exit_immediately: bool = typer.Option(False, "--exit-immediately", help="Exit immediately when the agent wants to finish instead of prompting.", rich_help_panel="Advanced"),
@@ -113,7 +112,6 @@ def main(
             "agent_class": agent_class or UNSET,
             "mode": "yolo" if yolo else UNSET,
             "quiet": True if quiet else UNSET,
-            "cost_limit": cost_limit if cost_limit is not None else UNSET,
             "confirm_exit": False if exit_immediately else UNSET,
             "output_path": output or UNSET,
         },
