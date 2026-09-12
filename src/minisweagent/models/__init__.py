@@ -58,6 +58,42 @@ def get_reasoning_effort(config: dict | None = None) -> str | None:
     )
 
 
+def get_api_base(config: dict | None = None) -> str:
+    """Resolve the effective provider base URL for a model config.
+
+    Precedence: an explicit ``model_kwargs.api_base`` (the litellm keyword) or
+    ``base_url``, then the model config's top-level ``api_base``/``base_url``,
+    then the common provider-specific environment variables.  Returns an empty
+    string when no base URL is configured, preserving ``get_model``'s existing
+    behaviour of treating an unset base URL as not matching any special case.
+
+    ``get_provider_url`` is an alias using the terminology from the startup
+    dashboard; both names resolve the same value.
+    """
+    config = config or {}
+    model_kwargs = config.get("model_kwargs") or {}
+    return (
+        model_kwargs.get("api_base")
+        or model_kwargs.get("base_url")
+        or config.get("api_base")
+        or config.get("base_url")
+        or os.getenv("OPENAI_API_BASE")
+        or os.getenv("OPENAI_BASE_URL")
+        or os.getenv("ANTHROPIC_BASE_URL")
+        or ""
+    )
+
+
+def get_provider_url(config: dict | None = None) -> str:
+    """Alias for :func:`get_api_base` using dashboard wording."""
+    return get_api_base(config)
+
+
+def get_base_url(config: dict | None = None) -> str:
+    """Alias for :func:`get_api_base` using the shortened config wording."""
+    return get_api_base(config)
+
+
 def get_model(input_model_name: str | None = None, config: dict | None = None) -> Model:
     """Get an initialized model object from any kind of user input or settings."""
     resolved_model_name = get_model_name(input_model_name, config)
@@ -78,13 +114,7 @@ def get_model(input_model_name: str | None = None, config: dict | None = None) -
 
     # OpenCode's Go router (https://opencode.ai/docs/go/) rejects requests that don't carry a
     # stable `x-opencode-session` header, so inject one per conversation (user value wins).
-    api_base = (
-        (config.get("model_kwargs") or {}).get("api_base")
-        or os.getenv("OPENAI_API_BASE")
-        or os.getenv("OPENAI_BASE_URL")
-        or os.getenv("ANTHROPIC_BASE_URL")
-        or ""
-    )
+    api_base = get_api_base(config)
     if "opencode.ai" in api_base and "/go" in api_base:
         config.setdefault("model_kwargs", {}).setdefault("extra_headers", {}).setdefault(
             "x-opencode-session", f"mini-swe-agent-{uuid.uuid4().hex}"
