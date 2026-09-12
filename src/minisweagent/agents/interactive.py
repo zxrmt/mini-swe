@@ -181,38 +181,43 @@ class InteractiveAgent(DefaultAgent):
         actions = message.get("extra", {}).get("actions", [])
         commands = [action["command"] for action in actions]
         outputs = []
+        submitted = None
         try:
             self._ask_confirmation_or_interrupt(commands)
             for action in actions:
                 outputs.append(self.env.execute(action))
         except Submitted as e:
-            self._check_for_new_task_or_submit(e)
+            submitted = e
         finally:
             result = self.add_messages(
                 *self.model.format_observation_messages(message, outputs, self.get_template_vars())
             )
+        if submitted is not None:
+            # Record and print the submission *before* asking what to do next, so the user
+            # actually sees the final output of the task instead of only the "Task Completed" prompt.
+            self.add_messages(*submitted.messages)
+            self._check_for_new_task_or_submit(submitted)
         return result
 
     def _add_observation_messages(self, message: dict, outputs: list[dict]) -> list[dict]:
         return self.add_messages(*self.model.format_observation_messages(message, outputs, self.get_template_vars()))
 
-    def _check_for_new_task_or_submit(self, e: Submitted) -> NoReturn:
-        """Check if user wants to add a new task or submit."""
-        if self.config.confirm_exit:
-            message = (
-                "[bold yellow]Task Completed[/bold yellow] "
-                "([bold]/h[/bold] for commands)\n"
-                "[bold yellow]>[/bold yellow] "
-            )
-            user_input = self._prompt_and_handle_slash_commands(message).strip()
-            if user_input == "/u":  # directly continue
-                self._interrupt("Switched to human mode.")
-            elif user_input in self._MODE_COMMANDS_MAPPING:  # ask again
-                return self._check_for_new_task_or_submit(e)
-            elif user_input:
-                self.extra_template_vars["task"] = user_input
-                self._interrupt(f"The user added a new task: {user_input}", itype="UserNewTask")
-        raise e
+    def _check_for_new_task_or_submit(self, e: Submitted) -> None:
+        """Ask the user whether to add a new task (the submission has already been recorded and shown)."""
+        if not self.config.confirm_exit:
+            return None
+        message = (
+            "[bold yellow]Task Completed[/bold yellow] ([bold]/h[/bold] for commands)\n[bold yellow]>[/bold yellow] "
+        )
+        user_input = self._prompt_and_handle_slash_commands(message).strip()
+        if user_input == "/u":  # directly continue
+            self._interrupt("Switched to human mode.")
+        elif user_input in self._MODE_COMMANDS_MAPPING:  # ask again
+            return self._check_for_new_task_or_submit(e)
+        elif user_input:
+            self.extra_template_vars["task"] = user_input
+            self._interrupt(f"The user added a new task: {user_input}", itype="UserNewTask")
+        return None
 
     def _should_ask_confirmation(self, action: str) -> bool:
         return self.config.mode == "confirm" and not any(re.match(r, action) for r in self.config.whitelist_actions)

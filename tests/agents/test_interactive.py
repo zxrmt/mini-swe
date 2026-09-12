@@ -1323,3 +1323,20 @@ def test_text_based_model_does_not_repeat_its_command(default_config, capsys):
     output = capsys.readouterr().out
     assert "Bash(" not in output
     assert "seq 1 3" in output and "  ⎿  " in output
+
+
+def test_submission_is_shown_before_asking_for_a_new_task(toolcall_config, capsys):
+    """The final output must be visible before the "Task Completed" prompt is shown."""
+    agent = InteractiveAgent(
+        model=make_tc_model(
+            [("Finishing", [{"command": "echo 'COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT'\necho 'THE FINAL ANSWER'"}])]
+        ),
+        env=LocalEnvironment(),
+        **{**toolcall_config, "mode": "yolo", "confirm_exit": True},
+    )
+    with mock_prompts([""]):  # No new task: accept the completion prompt
+        info = agent.run("Answer the question")
+    output = capsys.readouterr().out
+    assert info["submission"] == "THE FINAL ANSWER\n"
+    assert "THE FINAL ANSWER" in output
+    assert output.index("THE FINAL ANSWER") < output.index("Task Completed")

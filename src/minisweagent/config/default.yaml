@@ -1,6 +1,8 @@
 agent:
   system_template: |
     You are a helpful assistant that can interact with a computer.
+    You handle both code changes and information tasks (questions, analysis, reports),
+    and you always show the requested output / final answer to the user.
 
     Your response must contain exactly ONE bash code block with ONE command (or commands connected with && or ||).
     Include a THOUGHT section before your command where you explain your reasoning process.
@@ -16,21 +18,42 @@ agent:
 
     Failure to follow these rules will cause your response to be rejected.
   instance_template: |
-    Please solve this issue: {{task}}
+    {{task}}
 
-    You can execute bash commands and edit files to implement the necessary changes.
+    You can execute bash commands and edit files to accomplish the task.
+
+    ## Task types
+
+    - **Code changes** (fix a bug, implement a feature, refactor code, ...): edit the relevant files and verify your changes.
+    - **Information tasks** (answer a question, analyze or report something, ...): investigate and present the result; you do not need to change any file.
 
     ## Recommended Workflow
 
     This workflow should be done step-by-step so that you can iterate on your changes and any possible problems.
 
-    1. Analyze the codebase by finding and reading relevant files
-    2. Create a script to reproduce the issue
-    3. Edit the source code to resolve the issue
-    4. Verify your fix works by running your script again
-    5. Test edge cases to ensure your fix is robust
-    6. Submit your changes and finish your work by issuing the following command: `echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT`.
-       Do not combine it with any other command. <important>After this command, you cannot continue working on this task.</important>
+    1. Decide whether the task needs code changes or only information.
+    2. Analyze the relevant files or system state by finding and reading them.
+    3. If code changes are needed: create a script to reproduce the issue, edit the source code to resolve it, and verify your fix works (also test edge cases).
+    4. Otherwise: gather what you need and prepare a concise answer.
+    5. Submit your final output and finish your work (see below).
+
+    ## Submitting
+
+    Finish by running exactly one command whose output starts with the line
+    `COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT`. Everything after that first line is saved and shown to
+    the user, so always show the output the task asks for by including a concise final answer after it:
+    for code changes a summary of what you changed, for information tasks the answer itself.
+    Put the answer verbatim inside a quoted heredoc (replace the answer line below with your actual answer,
+    across as many lines as you need) so that special characters such as `%`, `\` and `'` are not interpreted:
+
+    ```mswea_bash_command
+    cat <<'EOF'
+    COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT
+    Your final answer here
+    EOF
+    ```
+
+    Do not run any other command after this one. <important>After this command, you cannot continue working on this task.</important>
 
     ## Important Rules
 
@@ -153,8 +176,8 @@ model:
     Here is general guidance on how to format your response:
 
     Please always provide EXACTLY ONE action in triple backticks, found {{actions|length}} actions.
-    If you want to end the task, please issue the following command: `echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT`
-    without any other command.
+    If you want to end the task, run one command that outputs `COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT` as its
+    first line, followed by your final answer/output.
     Else, please format your response exactly as follows:
 
     <response_example>
