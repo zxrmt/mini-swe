@@ -16,7 +16,7 @@ from minisweagent import __version__, global_config_dir
 from minisweagent.agents import get_agent
 from minisweagent.config import builtin_config_dir, get_config_from_spec
 from minisweagent.environments import get_environment
-from minisweagent.models import get_model, get_model_name, get_reasoning_effort
+from minisweagent.models import get_api_base, get_model, get_model_name, get_reasoning_effort
 from minisweagent.run.utilities.config import configure_if_first_time
 from minisweagent.utils.serialize import UNSET, recursive_merge
 
@@ -61,7 +61,7 @@ def _multiline_prompt() -> str:
 def _welcome_board(
     model_name: str, config_spec: list[str], agent_config: dict, model_config: dict | None = None
 ) -> Panel:
-    """What this run is about to do: which model, which configs, which mode, which reasoning effort."""
+    """What this run is about to do: which model, provider URL, configs, mode, and reasoning effort."""
     specs = "\n          ".join(str(spec) for spec in config_spec)
     mode = agent_config.get("mode", "confirm") + (" (quiet)" if agent_config.get("quiet") else "")
     model_config = model_config or {}
@@ -70,8 +70,16 @@ def _welcome_board(
     reasoning_effort = (model_config.get("model_kwargs") or {}).get("reasoning_effort") or model_config.get(
         "reasoning_effort"
     )
+    # `get_api_base` also checks the OPENAI_* / ANTHROPIC_* environment variables, so the
+    # board shows the endpoint that `get_model` will actually use even when it is only set
+    # in the global .env file.
+    provider_url = get_api_base(model_config)
+    provider_line = f"[bold]Provider[/bold]  {provider_url or 'default'}"
+    if provider_url:
+        provider_line += " [dim](Base URL)[/dim]"
     return Panel(
         f"[bold]Model[/bold]     [green]{model_name}[/green]\n"
+        f"{provider_line}\n"
         f"[bold]Reasoning[/bold] {reasoning_effort or 'default'}\n"
         f"[bold]Config[/bold]    {specs}\n"
         f"[bold]Mode[/bold]      {mode}",
