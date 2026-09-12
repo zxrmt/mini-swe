@@ -1,3 +1,6 @@
+import json
+import os
+import time
 from contextlib import contextmanager
 from pathlib import Path
 from unittest.mock import patch
@@ -7,7 +10,6 @@ import yaml
 
 from minisweagent.agents.interactive import InteractiveAgent, _format_action_line, _observation_rows
 from minisweagent.environments.local import LocalEnvironment
-from minisweagent.models.utils.content_string import get_content_string
 from minisweagent.models.test_models import (
     DeterministicModel,
     DeterministicResponseAPIToolcallModel,
@@ -16,6 +18,7 @@ from minisweagent.models.test_models import (
     make_response_api_output,
     make_toolcall_output,
 )
+from minisweagent.models.utils.content_string import get_content_string
 
 
 @contextmanager
@@ -987,6 +990,44 @@ def test_continue_after_completion_with_new_task(model_factory):
         assert len(new_task_messages) == 1
 
 
+def test_continue_after_completion_does_not_replay_exit_message(model_factory):
+    """Continuing a finished conversation must not pass the internal `exit` role to the model.
+
+    Regression test: the `exit` marker that ends a run is not a valid chat role, so replaying it
+    as history made the API reject the follow-up request ("unknown variant `exit`"). It must be
+    dropped before the conversation continues.
+    """
+    factory, config = model_factory
+    with mock_prompts(["", "Create a new file", "", ""]):
+        agent = InteractiveAgent(
+            model=factory(
+                [
+                    ("First", [{"command": "echo 'COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT'\necho 'first done'"}]),
+                    ("Second", [{"command": "echo 'COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT'\necho 'second done'"}]),
+                ]
+            ),
+            env=LocalEnvironment(),
+            **config,
+        )
+        queried_roles = []
+        original_query = agent.model.query
+
+        def recording_query(messages, **kwargs):
+            queried_roles.append([msg.get("role") for msg in messages])
+            return original_query(messages, **kwargs)
+
+        agent.model.query = recording_query
+        info = agent.run("Complete the initial task")
+
+    assert info["exit_status"] == "Submitted"
+    # At least one follow-up query happened after the first completion...
+    assert len(queried_roles) >= 2
+    # ...and the model never saw the `exit` marker.
+    assert not any("exit" in roles for roles in queried_roles)
+    # Only the final terminating marker is kept in the saved history.
+    assert [msg for msg in agent.messages if msg.get("role") == "exit"] == [agent.messages[-1]]
+
+
 def test_continue_after_completion_without_new_task(model_factory):
     """Test that agent finishes normally when user doesn't provide a new task."""
     factory, config = model_factory
@@ -1513,3 +1554,237 @@ def test_new_conversation_after_keyboard_interrupt(model_factory):
     assert info["submission"] == "after interrupt\n"
     assert not any("Original task" in get_text(msg) for msg in agent.messages)
     assert any("Interrupted new task" in get_text(msg) for msg in agent.messages)
+
+
+# --- /resume: selecting a previous conversation ---
+
+
+def _save_conversation(
+    path: Path,
+    *,
+    task: str = "Saved task",
+    exit_status: str = "",
+    api_calls: int = 1,
+    mtime: float | None = None,
+    finished: bool = False,
+) -> Path:
+    """Write a trajectory file the way an interrupted (or finished) run leaves it behind."""
+    messages = [
+        {"role": "system", "content": "system prompt"},
+        {"role": "user", "content": f"Please solve: {task}"},
+        {"role": "assistant", "content": "working on it", "extra": {"actions": [{"command": "echo hi"}]}},
+        {"role": "user", "content": "observation"},
+    ]
+    if finished:
+        messages.append(
+            {
+                "role": "exit",
+                "content": "Submitted",
+                "extra": {"exit_status": exit_status or "Submitted", "submission": "old submission\n"},
+            }
+        )
+    path.write_text(
+        json.dumps(
+            {
+                "info": {
+                    "task": task,
+                    "exit_status": exit_status,
+                    "model_stats": {"api_calls": api_calls, "instance_cost": 0.0},
+                },
+                "messages": messages,
+            }
+        )
+    )
+    if mtime is not None:
+        os.utime(path, (mtime, mtime))
+    return path
+
+
+def test_list_conversations_orders_and_skips_broken_files(tmp_path):
+    """Conversations are returned newest-first and broken/non-trajectory files are ignored."""
+    from minisweagent.agents.interactive import list_conversations
+
+    now = time.time()
+    _save_conversation(tmp_path / "older.traj.json", task="Older task", mtime=now - 100)
+    _save_conversation(tmp_path / "newer.traj.json", task="Newer task", mtime=now)
+    (tmp_path / "broken.traj.json").write_text("{ this is not json")
+    (tmp_path / "notes.txt").write_text("hello")
+
+    conversations = list_conversations(tmp_path)
+
+    assert [c.task for c in conversations] == ["Newer task", "Older task"]
+    assert conversations[0].path == tmp_path / "newer.traj.json"
+
+
+def test_resume_lists_and_continues_selected_conversation(model_factory, tmp_path, capsys):
+    """`/resume` shows the saved conversations and continues the one the user picks."""
+    factory, config = model_factory
+    now = time.time()
+    _save_conversation(tmp_path / "older.traj.json", task="Older task", api_calls=1, mtime=now - 100)
+    _save_conversation(tmp_path / "newer.traj.json", task="Newer task", api_calls=2, mtime=now)
+    with mock_prompts(
+        [
+            "/resume",  # Confirmation prompt: ask for the list of conversations
+            "1",  # Pick the most recent one
+            "",  # Confirm the resumed conversation's submitting action
+            "",  # No further task
+        ]
+    ):
+        agent = InteractiveAgent(
+            model=factory(
+                [
+                    ("First", [{"command": "echo 'should not run'"}]),  # Consumed before the resume, then discarded
+                    ("Second", [{"command": "echo 'COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT'\necho 'resumed done'"}]),
+                ]
+            ),
+            env=LocalEnvironment(),
+            **{**config, "conversation_dir": tmp_path},
+        )
+        info = agent.run("Original task")
+
+    output = capsys.readouterr().out
+    assert info["exit_status"] == "Submitted"
+    assert info["submission"] == "resumed done\n"
+    contents = [get_text(msg) for msg in agent.messages]
+    # The selected (newest) conversation is now the active one...
+    assert any("Newer task" in c for c in contents)
+    assert not any("Older task" in c for c in contents)
+    # ...and the discarded first conversation never ran its command.
+    assert not any("should not run" in c for c in contents)
+    assert agent.conversation_path == tmp_path / "newer.traj.json"
+    # The list actually showed the conversations as selectable options.
+    assert "Saved conversations" in output
+    assert "Older task" in output and "Newer task" in output
+
+
+def test_resume_with_inline_selection(model_factory, tmp_path):
+    """The conversation number can be given on the same line as `/resume`, skipping the prompt."""
+    factory, config = model_factory
+    now = time.time()
+    _save_conversation(tmp_path / "a.traj.json", task="A task", mtime=now)
+    _save_conversation(tmp_path / "b.traj.json", task="B task", mtime=now - 100)
+    with mock_prompts(["/resume 2", "", ""]):
+        agent = InteractiveAgent(
+            model=factory(
+                [
+                    ("First", [{"command": "echo 'nope'"}]),
+                    ("Second", [{"command": "echo 'COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT'\necho 'inline'"}]),
+                ]
+            ),
+            env=LocalEnvironment(),
+            **{**config, "conversation_dir": tmp_path},
+        )
+        info = agent.run("Original task")
+
+    assert info["submission"] == "inline\n"
+    assert any("B task" in get_text(msg) for msg in agent.messages)
+    assert not any("A task" in get_text(msg) for msg in agent.messages)
+
+
+def test_resume_finished_conversation_continues_it(model_factory, tmp_path):
+    """Resuming a conversation that already finished lets the user keep going."""
+    factory, config = model_factory
+    _save_conversation(tmp_path / "finished.traj.json", task="Finished task", exit_status="Submitted", finished=True)
+    with mock_prompts(["/resume", "1", "", ""]):
+        agent = InteractiveAgent(
+            model=factory(
+                [
+                    ("First", [{"command": "echo 'nope'"}]),  # Consumed before the resume, then discarded
+                    ("Second", [{"command": "echo 'COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT'\necho 'continued'"}]),
+                ]
+            ),
+            env=LocalEnvironment(),
+            **{**config, "conversation_dir": tmp_path},
+        )
+        info = agent.run("Original task")
+
+    assert info["exit_status"] == "Submitted"
+    assert info["submission"] == "continued\n"
+    assert any("Finished task" in get_text(msg) for msg in agent.messages)
+
+
+def test_resume_without_saved_conversations_reprompts(model_factory, tmp_path, capsys):
+    """`/resume` with an empty conversation directory explains itself and prompts again."""
+    factory, config = model_factory
+    with mock_prompts(["/resume", "", ""]):
+        agent = InteractiveAgent(
+            model=factory([("First", [{"command": "echo 'COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT'\necho 'done'"}])]),
+            env=LocalEnvironment(),
+            **{**config, "conversation_dir": tmp_path},
+        )
+        info = agent.run("Original task")
+
+    assert info["exit_status"] == "Submitted"
+    assert info["submission"] == "done\n"
+    assert "No saved conversations found" in capsys.readouterr().out
+
+
+def test_resume_invalid_selection_reprompts(model_factory, tmp_path, capsys):
+    """An out-of-range selection is rejected and the user can still continue the run."""
+    factory, config = model_factory
+    _save_conversation(tmp_path / "saved.traj.json", task="Saved task")
+    with mock_prompts(["/resume", "99", "", ""]):
+        agent = InteractiveAgent(
+            model=factory([("First", [{"command": "echo 'COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT'\necho 'done'"}])]),
+            env=LocalEnvironment(),
+            **{**config, "conversation_dir": tmp_path},
+        )
+        info = agent.run("Original task")
+
+    assert info["exit_status"] == "Submitted"
+    assert info["submission"] == "done\n"
+    assert not any("Saved task" in get_text(msg) for msg in agent.messages)
+    assert "Invalid selection" in capsys.readouterr().out
+
+
+def test_conversations_are_archived_to_the_conversation_dir(model_factory, tmp_path):
+    """Every conversation is written to the conversation directory so `/resume` can list it."""
+    factory, config = model_factory
+    with mock_prompts(["", ""]):
+        agent = InteractiveAgent(
+            model=factory([("First", [{"command": "echo 'COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT'\necho 'done'"}])]),
+            env=LocalEnvironment(),
+            **{**config, "conversation_dir": tmp_path},
+        )
+        agent.run("Archive me")
+
+    files = list(tmp_path.glob("*.traj.json"))
+    assert len(files) == 1
+    saved = json.loads(files[0].read_text())
+    assert saved["info"]["task"] == "Archive me"
+    assert saved["info"]["exit_status"] == "Submitted"
+
+
+def test_conversation_archived_alongside_the_output_file(model_factory, tmp_path):
+    """The regular output file keeps being written, and a copy lands in the conversation directory."""
+    factory, config = model_factory
+    output = tmp_path / "last_run.traj.json"
+    conversation_dir = tmp_path / "conversations"
+    with mock_prompts(["", ""]):
+        agent = InteractiveAgent(
+            model=factory([("First", [{"command": "echo 'COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT'\necho 'done'"}])]),
+            env=LocalEnvironment(),
+            **{**config, "conversation_dir": conversation_dir, "output_path": output},
+        )
+        agent.run("Archive me twice")
+
+    archived = list(conversation_dir.glob("*.traj.json"))
+    assert len(archived) == 1
+    assert json.loads(archived[0].read_text())["info"]["task"] == "Archive me twice"
+    assert json.loads(output.read_text())["info"]["task"] == "Archive me twice"
+
+
+def test_help_command_lists_resume(model_factory):
+    """The help text advertises the /resume command."""
+    factory, config = model_factory
+    with mock_prompts(["/h", "", ""]):
+        with patch("minisweagent.agents.interactive.console.print") as mock_print:
+            agent = InteractiveAgent(
+                model=factory(
+                    [("Finishing", [{"command": "echo 'COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT'\necho 'done'"}])]
+                ),
+                env=LocalEnvironment(),
+                **config,
+            )
+            agent.run("Test help lists /resume")
+    assert any("/resume" in str(call) for call in mock_print.call_args_list)

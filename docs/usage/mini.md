@@ -61,6 +61,16 @@ keeps the whole history as context. Type `/new` at any prompt to discard the cur
 start over with a fresh task and an empty context. You can pass the task on the same line, e.g.
 `/new write a sudoku game`; otherwise `mini` prompts you for it.
 
+## Resuming a previous conversation
+
+Every conversation is saved to a `conversations` directory inside your global config directory after
+each step. Type `/resume` at any prompt to list the saved conversations (most recent first, with their
+task, status and number of model calls) and pick one by number to continue it with its history intact.
+You can also pass the choice on the same line, e.g. `/resume 2`.
+
+This differs from `-r`/`--resume` on the command line, which continues a single trajectory file that you
+name (or the last run's default output file).
+
 ## Miscellaneous tips
 
 - `mini` saves the full history of your last run to your global config directory.

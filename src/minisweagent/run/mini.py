@@ -10,6 +10,7 @@ from typing import Any
 
 import typer
 from rich.console import Console
+from rich.markup import escape
 from rich.panel import Panel
 
 from minisweagent import __version__, global_config_dir
@@ -22,6 +23,7 @@ from minisweagent.utils.serialize import UNSET, recursive_merge
 
 DEFAULT_CONFIG_FILE = Path(os.getenv("MSWEA_MINI_CONFIG_PATH", builtin_config_dir / "mini.yaml"))
 DEFAULT_OUTPUT_FILE = global_config_dir / "last_mini_run.traj.json"
+DEFAULT_CONVERSATIONS_DIR = global_config_dir / "conversations"
 
 
 _HELP_TEXT = """Run mini-SWE-agent in your local environment.
@@ -56,6 +58,35 @@ def _multiline_prompt() -> str:
     from minisweagent.agents.utils.prompt_user import _multiline_prompt as prompt
 
     return prompt()
+
+
+def _prompt_for_initial_task(conversation_dir: Path | None) -> tuple[str, Path | None]:
+    """Ask the user for the first task, handling the `/resume` and `/new` commands.
+
+    Slash commands are handled here (rather than by the agent) because the model is only loaded
+    after the user answers, keeping startup cheap. Returns the task to run and, when the user asked
+    to resume, the trajectory path to load before running.
+    """
+    from minisweagent.agents.interactive import select_conversation
+
+    conversation_dir = Path(conversation_dir) if conversation_dir else None
+    while True:
+        console.print("[bold yellow]What do you want to do?")
+        console.print("[bold yellow]>[/bold yellow] ", end="")
+        user_input = _multiline_prompt().strip()
+        if user_input == "/resume" or user_input.startswith("/resume "):
+            selected = select_conversation(conversation_dir, user_input[len("/resume") :].strip())
+            if selected is not None:
+                console.print(f"[bold green]Resuming conversation {escape(str(selected))}[/bold green]")
+                return "", selected
+            continue
+        if user_input == "/new" or user_input.startswith("/new "):
+            task = user_input[len("/new") :].strip()
+            if task:
+                console.print("[bold green]Starting a new conversation.[/bold green]")
+                return task, None
+            continue
+        return user_input, None
 
 
 def _welcome_board(
@@ -122,6 +153,7 @@ def main(
             "quiet": True if quiet else UNSET,
             "confirm_exit": False if exit_immediately else UNSET,
             "output_path": output or UNSET,
+            "conversation_dir": DEFAULT_CONVERSATIONS_DIR,
         },
         "model": {
             "model_class": model_class or UNSET,
@@ -196,19 +228,24 @@ def main(
         )
     )
 
+    prompted_resume: Path | None = None
     if resume:
         run_task = ""
         console.print(f"Resuming interrupted run from [bold green]'{resume_file}'[/bold green]")
-    elif (run_task := config.get("run", {}).get("task", UNSET)) is UNSET:
-        console.print("[bold yellow]What do you want to do?")
-        console.print("[bold yellow]>[/bold yellow] ", end="")
-        run_task = _multiline_prompt()
+    elif (configured_task := config.get("run", {}).get("task", UNSET)) is not UNSET:
+        run_task = configured_task
+    else:
+        run_task, prompted_resume = _prompt_for_initial_task(config.get("agent", {}).get("conversation_dir"))
 
     model = get_model(config=config.get("model", {}))
     env = get_environment(config.get("environment", {}), default_type="local")
     agent = get_agent(model, env, config.get("agent", {}), default_type="interactive")
     if resume:
         agent.load(resume_file)
+    elif prompted_resume is not None:
+        # Continue the conversation chosen with `/resume` at the initial prompt (`mini` uses the
+        # interactive agent, whose `resume_conversation` also re-opens finished conversations).
+        getattr(agent, "resume_conversation", agent.load)(prompted_resume)
     agent.run(run_task)
     if (output_path := config.get("agent", {}).get("output_path")):
         console.print(f"Saved trajectory to [bold green]'{output_path}'[/bold green]")

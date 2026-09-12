@@ -6,9 +6,12 @@ There are three modes:
 - yolo: commands issued by the LM are executed immediately without confirmation
 """
 
+import json
 import re
 import sys
 import time
+from dataclasses import dataclass
+from pathlib import Path
 from typing import Literal, NoReturn
 
 from rich.console import Console
@@ -34,6 +37,81 @@ class NewConversation(InterruptAgentFlow):
     def __init__(self, task: str):
         self.task = task
         super().__init__()
+
+
+class ResumeConversation(InterruptAgentFlow):
+    """Raised to load a previously saved conversation and continue it."""
+
+    def __init__(self, path: Path):
+        self.path = path
+        super().__init__()
+
+
+@dataclass
+class SavedConversation:
+    """A trajectory file that `/resume` can offer to the user."""
+
+    path: Path
+    task: str = ""
+    exit_status: str = ""
+    api_calls: int = 0
+    mtime: float = 0.0
+
+
+def list_conversations(directory: Path) -> list[SavedConversation]:
+    """Return the saved conversations in ``directory``, most recently modified first."""
+    conversations = []
+    for path in directory.glob("*.traj.json"):
+        try:
+            info = json.loads(path.read_text()).get("info") or {}
+        except (json.JSONDecodeError, OSError):  # unreadable file: skip instead of crashing /resume
+            continue
+        stats = info.get("model_stats") or {}
+        conversations.append(
+            SavedConversation(
+                path=path,
+                task=str(info.get("task") or ""),
+                exit_status=str(info.get("exit_status") or ""),
+                api_calls=int(stats.get("api_calls") or 0),
+                mtime=path.stat().st_mtime,
+            )
+        )
+    return sorted(conversations, key=lambda c: c.mtime, reverse=True)
+
+
+def select_conversation(conversation_dir: Path | None, selection: str = "") -> Path | None:
+    """List the saved conversations in ``conversation_dir`` and let the user pick one.
+
+    ``selection`` is the optional choice typed on the same line as the command (``/resume 2``);
+    when it is empty the user is prompted. Returns the chosen path, or ``None`` if the user
+    cancelled or picked an invalid entry.
+    """
+    conversations = list_conversations(conversation_dir) if conversation_dir else []
+    if not conversations:
+        console.print("[bold yellow]No saved conversations found.[/bold yellow]")
+        return None
+    console.print("[bold]Saved conversations:[/bold]")
+    for i, conversation in enumerate(conversations, 1):
+        task = " ".join(conversation.task.split())[:60] or "(no task)"
+        when = time.strftime("%Y-%m-%d %H:%M", time.localtime(conversation.mtime))
+        status = conversation.exit_status or "in progress"
+        console.print(
+            f"  [bold green]{i}[/bold green]  [dim]{when}[/dim]  {escape(status)}  "
+            f"[dim]{conversation.api_calls} steps[/dim]  {escape(task)}"
+        )
+    if not selection:
+        console.print("[bold yellow]Select a conversation (number, Enter to cancel)[/bold yellow]")
+        console.print("[bold yellow]>[/bold yellow] ", end="")
+        selection = prompt_session.prompt("").strip()
+    try:
+        index = int(selection)
+    except ValueError:
+        index = 0
+    if 1 <= index <= len(conversations):
+        return conversations[index - 1].path
+    if selection:
+        console.print(f"[bold red]Invalid selection: {escape(selection)}[/bold red]")
+    return None
 
 
 def _format_action_line(command: str) -> str:
@@ -71,6 +149,8 @@ class InteractiveAgentConfig(AgentConfig):
     """Hide the system/instance prompts and print observations without the returncode/key wrappers."""
     observation_display_lines: int = 3
     """Only display this many lines of every command output (0 = all). The model still sees all of it."""
+    conversation_dir: Path | None = None
+    """If set, save every conversation here and let `/resume` list them."""
 
 
 class InteractiveAgent(DefaultAgent):
@@ -79,6 +159,21 @@ class InteractiveAgent(DefaultAgent):
     def __init__(self, *args, config_class=InteractiveAgentConfig, **kwargs):
         super().__init__(*args, config_class=config_class, **kwargs)
         self.cost_last_confirmed = 0.0
+        self.conversation_path: Path | None = None
+
+    def run(self, task: str = "", **kwargs) -> dict:
+        if not self.messages:  # fresh conversation: give it its own file so `/resume` can find it later
+            self.conversation_path = self._new_conversation_path(task)
+        return super().run(task, **kwargs)
+
+    def save(self, path: Path | None = None, *extra_dicts) -> dict:
+        # Write the regular output file, but also keep a copy in the conversations directory.
+        data = super().save(path, *extra_dicts)
+        primary = Path(path or self.config.output_path) if (path or self.config.output_path) else None
+        if self.conversation_path and primary != self.conversation_path:
+            self.conversation_path.parent.mkdir(parents=True, exist_ok=True)
+            self.conversation_path.write_text(json.dumps(data, indent=2))
+        return data
 
     def _interrupt(self, content: str, *, itype: str = "UserInterruption") -> NoReturn:
         raise UserInterruption({"role": "user", "content": content, "extra": {"interrupt_type": itype}})
@@ -177,6 +272,8 @@ class InteractiveAgent(DefaultAgent):
             return super().step()
         except NewConversation as e:
             return self._start_new_conversation(e.task)
+        except ResumeConversation as e:
+            return self.resume_conversation(e.path)
         except KeyboardInterrupt:
             try:
                 interruption_message = self._prompt_and_handle_slash_commands(
@@ -186,6 +283,8 @@ class InteractiveAgent(DefaultAgent):
                 ).strip()
             except NewConversation as e:
                 return self._start_new_conversation(e.task)
+            except ResumeConversation as e:
+                return self.resume_conversation(e.path)
             if not interruption_message or interruption_message in self._MODE_COMMANDS_MAPPING:
                 interruption_message = "Temporary interruption caught."
             self._interrupt(f"Interrupted by user: {interruption_message}")
@@ -224,10 +323,39 @@ class InteractiveAgent(DefaultAgent):
         self.n_consecutive_format_errors = 0
         self.extra_template_vars = {"task": task}
         self._start_time = time.time()
+        self.conversation_path = self._new_conversation_path(task)
         return self.add_messages(
             self.model.format_message(role="system", content=self._render_template(self.config.system_template)),
             self.model.format_message(role="user", content=self._render_template(self.config.instance_template)),
         )
+
+    def _new_conversation_path(self, task: str) -> Path | None:
+        """Where to archive a fresh conversation, so that `/resume` can find it later."""
+        if not self.config.conversation_dir:
+            return None
+        self.config.conversation_dir.mkdir(parents=True, exist_ok=True)
+        slug = re.sub(r"[^A-Za-z0-9]+", "-", task).strip("-").lower()[:40] or "conversation"
+        stamp = time.strftime("%Y%m%d-%H%M%S")
+        path = self.config.conversation_dir / f"{stamp}-{slug}.traj.json"
+        counter = 2
+        while path.exists():
+            path = self.config.conversation_dir / f"{stamp}-{slug}-{counter}.traj.json"
+            counter += 1
+        return path
+
+    def resume_conversation(self, path: Path) -> list[dict]:
+        """Load a saved conversation and continue it in place of the current one."""
+        output_path = self.config.output_path
+        self.load(path)
+        # `load` retargets the output file to the loaded trajectory; keep the session's own output
+        # file too (the resumed conversation is still archived under `conversation_path`).
+        self.config.output_path = output_path
+        self.conversation_path = path
+        self._drop_exit_message()  # the saved run was finished: drop the exit so that run() keeps going
+        return self.messages
+
+    def _select_conversation(self, selection: str) -> Path | None:
+        return select_conversation(self.config.conversation_dir, selection)
 
     def _check_for_new_task_or_submit(self, e: Submitted) -> None:
         """Ask the user whether to add a new task (the submission has already been recorded and shown)."""
@@ -238,13 +366,24 @@ class InteractiveAgent(DefaultAgent):
         )
         user_input = self._prompt_and_handle_slash_commands(message).strip()
         if user_input == "/u":  # directly continue
+            self._drop_exit_message()
             self._interrupt("Switched to human mode.")
         elif user_input in self._MODE_COMMANDS_MAPPING:  # ask again
             return self._check_for_new_task_or_submit(e)
         elif user_input:
             self.extra_template_vars["task"] = user_input
+            self._drop_exit_message()
             self._interrupt(f"The user added a new task: {user_input}", itype="UserNewTask")
         return None
+
+    def _drop_exit_message(self) -> None:
+        """Drop the trailing exit marker from a finished run so the conversation can continue.
+
+        The ``exit`` role is an internal marker and is rejected by the LM API, so it must never
+        be part of the history sent to the model.
+        """
+        if self.messages and self.messages[-1].get("role") == "exit":
+            self.messages.pop()
 
     def _should_ask_confirmation(self, action: str) -> bool:
         return self.config.mode == "confirm" and not any(re.match(r, action) for r in self.config.whitelist_actions)
@@ -283,7 +422,8 @@ class InteractiveAgent(DefaultAgent):
                 f"[bold green]/c[/bold green] to switch to [bold yellow]confirmation[/bold yellow] mode (ask for confirmation before executing LM commands)\n"
                 f"[bold green]/u[/bold green] to switch to [bold yellow]human[/bold yellow] mode (execute commands issued by the user)\n"
                 f"[bold green]/m[/bold green] to enter multiline comment\n"
-                f"[bold green]/new[/bold green] to start a new conversation (discards the current history)",
+                f"[bold green]/new[/bold green] to start a new conversation (discards the current history)\n"
+                f"[bold green]/resume[/bold green] to list saved conversations and continue one",
             )
             return self._prompt_and_handle_slash_commands(prompt)
         if user_input == "/new" or user_input.startswith("/new "):
@@ -294,6 +434,11 @@ class InteractiveAgent(DefaultAgent):
                 console.print("[bold yellow]>[/bold yellow] ", end="")
                 task = _multiline_prompt()
             raise NewConversation(task)
+        if user_input == "/resume" or user_input.startswith("/resume "):
+            if (path := self._select_conversation(user_input[len("/resume") :].strip())) is not None:
+                console.print(f"[bold green]Resuming conversation {escape(str(path))}[/bold green]")
+                raise ResumeConversation(path)
+            return self._prompt_and_handle_slash_commands(prompt)
         if user_input in self._MODE_COMMANDS_MAPPING:
             if self.config.mode == self._MODE_COMMANDS_MAPPING[user_input]:
                 return self._prompt_and_handle_slash_commands(

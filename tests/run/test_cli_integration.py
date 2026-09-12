@@ -123,6 +123,38 @@ def test_mini_command_calls_run_interactive():
         mock_agent.run.assert_called_once_with("Test task")
 
 
+def test_mini_configures_a_conversation_directory():
+    """`mini` points the interactive agent at a directory of conversations for `/resume`."""
+    from minisweagent import global_config_dir
+    from minisweagent.run.mini import DEFAULT_CONVERSATIONS_DIR
+
+    with (
+        patch("minisweagent.run.mini.configure_if_first_time"),
+        patch("minisweagent.run.mini.get_agent") as mock_get_agent,
+        patch("minisweagent.run.mini.get_model") as mock_get_model,
+        patch("minisweagent.run.mini.get_environment") as mock_get_env,
+        patch("minisweagent.run.mini.get_config_from_spec", return_value={"agent": {}, "model": {}}),
+    ):
+        mock_get_model.return_value = Mock()
+        mock_get_env.return_value = Mock()
+        mock_get_agent.return_value = Mock(run=Mock(return_value={}))
+
+        main(
+            config_spec=[str(DEFAULT_CONFIG_FILE)],
+            model_name="test-model",
+            task="Test task",
+            yolo=False,
+            output=None,
+            model_class=None,
+            agent_class=None,
+            environment_class=None,
+        )
+
+    args, _ = mock_get_agent.call_args
+    assert args[2]["conversation_dir"] == DEFAULT_CONVERSATIONS_DIR
+    assert DEFAULT_CONVERSATIONS_DIR == global_config_dir / "conversations"
+
+
 def test_mini_calls_prompt_when_no_task_provided():
     """Test that mini calls prompt when no task is provided."""
     with (
@@ -995,3 +1027,88 @@ def test_resume_requested_reasoning_effort_wins_over_saved(tmp_path, monkeypatch
 
     assert captured["config"]["reasoning_effort"] == "max"
     assert captured["config"]["model_kwargs"]["reasoning_effort"] == "max"
+
+
+# --- /resume and /new at the initial "What do you want to do?" prompt ---
+
+
+def _write_saved_conversation(path: Path, task: str = "Saved task") -> Path:
+    """Write a trajectory file the way the conversation archiver leaves it behind."""
+    path.write_text(
+        json.dumps(
+            {
+                "info": {"task": task, "exit_status": "", "model_stats": {"api_calls": 1}},
+                "messages": [
+                    {"role": "system", "content": "system prompt"},
+                    {"role": "user", "content": f"Please solve: {task}"},
+                ],
+            }
+        )
+    )
+    return path
+
+
+def _run_main_with_initial_prompt(prompt_returns, conversation_dir):
+    """Run `main` without a task, faking both the task prompt and the conversation picker."""
+    with (
+        patch("minisweagent.run.mini.configure_if_first_time"),
+        patch("minisweagent.run.mini.DEFAULT_CONVERSATIONS_DIR", conversation_dir),
+        patch("minisweagent.run.mini._multiline_prompt", side_effect=prompt_returns),
+        patch("minisweagent.agents.utils.prompt_user.prompt_session.prompt", return_value="1"),
+        patch("minisweagent.run.mini.get_agent") as mock_get_agent,
+        patch("minisweagent.run.mini.get_model") as mock_get_model,
+        patch("minisweagent.run.mini.get_environment") as mock_get_env,
+        patch("minisweagent.run.mini.get_config_from_spec", return_value={"agent": {}, "model": {}}),
+    ):
+        mock_get_model.return_value = Mock()
+        mock_get_env.return_value = Mock()
+        mock_agent = Mock(run=Mock(return_value={}))
+        mock_get_agent.return_value = mock_agent
+
+        main(
+            config_spec=[str(DEFAULT_CONFIG_FILE)],
+            model_name="test-model",
+            task=None,
+            yolo=False,
+            output=None,
+            model_class=None,
+            agent_class=None,
+            environment_class=None,
+        )
+    return mock_agent
+
+
+def test_initial_prompt_resume_selects_and_resumes(tmp_path):
+    """`/resume` at the startup prompt lists saved conversations and loads the chosen one."""
+    conversation = _write_saved_conversation(tmp_path / "saved.traj.json", "A saved task")
+
+    mock_agent = _run_main_with_initial_prompt(["/resume"], tmp_path)
+
+    mock_agent.resume_conversation.assert_called_once_with(conversation)
+    mock_agent.run.assert_called_once_with("")
+
+
+def test_initial_prompt_resume_inline_selection(tmp_path):
+    """The conversation number can be passed on the `/resume` line to skip the picker."""
+    conversation = _write_saved_conversation(tmp_path / "saved.traj.json", "A saved task")
+
+    mock_agent = _run_main_with_initial_prompt(["/resume 1"], tmp_path)
+
+    mock_agent.resume_conversation.assert_called_once_with(conversation)
+    mock_agent.run.assert_called_once_with("")
+
+
+def test_initial_prompt_resume_without_saved_conversations_reprompts(tmp_path):
+    """`/resume` with nothing to resume explains itself and asks for a task again."""
+    mock_agent = _run_main_with_initial_prompt(["/resume", "A real task"], tmp_path)
+
+    mock_agent.resume_conversation.assert_not_called()
+    mock_agent.run.assert_called_once_with("A real task")
+
+
+def test_initial_prompt_new_with_inline_task(tmp_path):
+    """`/new <task>` at the startup prompt runs `<task>` instead of the literal command."""
+    mock_agent = _run_main_with_initial_prompt(["/new build a thing"], tmp_path)
+
+    mock_agent.run.assert_called_once_with("build a thing")
+    mock_agent.resume_conversation.assert_not_called()
