@@ -109,6 +109,20 @@ MSWEA_NOTIFY_CHANNEL="terminal_bell"
 The same option can be set per run in the yaml config (`agent: notify_channel: terminal_bell`) or
 with the `mini` flag `--notify-channel terminal_bell`.
 
+## Blocking agent file access
+
+Refuse the agent access to specific files or folders. Any command that references one of these paths is not
+executed; instead the agent gets an "Access denied" error explaining that the path is off-limits. The value is a
+colon-separated (``:``) list of absolute paths, where a folder also blocks everything inside it:
+
+```bash
+# Files/folders the agent is not allowed to access (default: empty = everything allowed)
+MSWEA_DISABLE_AGENT_ACCESS="/home/user/.ssh:/home/user/.aws/credentials:/etc/shadow"
+```
+
+The same option can be set per run in the yaml config (``environment: disabled_access: ["/home/user/.ssh"]``).
+Blocking is currently enforced by the local environment, which is the default.
+
 ## Default config files
 
 ```bash
