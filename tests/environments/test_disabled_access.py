@@ -6,7 +6,12 @@ import pytest
 import yaml
 
 from minisweagent.agents.default import DefaultAgent
-from minisweagent.environments.local import DISABLED_ACCESS_ENV_VAR, LocalEnvironment, LocalEnvironmentConfig
+from minisweagent.environments.local import (
+    DISABLED_ACCESS_ENV_VAR,
+    LocalEnvironment,
+    LocalEnvironmentConfig,
+    _resolve_path,
+)
 from minisweagent.models.test_models import DeterministicModel, make_output
 
 
@@ -128,3 +133,22 @@ def test_agent_receives_access_denied_as_observation(tmp_path):
     observation = agent.messages[3]["content"]
     assert "Access denied" in observation
     assert "top secret content" not in observation
+
+
+@pytest.mark.parametrize("path", ["~nonexistentuser123/foo", "~+foo"])
+def test_resolve_path_handles_unexpandable_tilde(path, tmp_path):
+    """A ``~user``/``~+`` token that cannot be mapped to a home directory must not crash resolution."""
+    resolved = _resolve_path(path, str(tmp_path))
+
+    assert resolved.is_absolute()
+    assert resolved == tmp_path.resolve() / path
+
+
+def test_command_with_unexpandable_tilde_does_not_crash(tmp_path):
+    """Referencing an unresolvable ``~user`` path must not blow up the access check."""
+    env = LocalEnvironment(disabled_access=str(tmp_path / "secret"))
+
+    result = env.execute({"command": "echo ~nonexistentuser123/foo"})
+
+    assert result["returncode"] == 0
+    assert "~nonexistentuser123/foo" in result["output"]

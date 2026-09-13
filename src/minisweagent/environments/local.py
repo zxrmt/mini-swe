@@ -120,7 +120,12 @@ class LocalEnvironment:
 
 def _resolve_path(path: str, cwd: str) -> Path:
     """Expand ``~`` and resolve ``path`` to an absolute path, interpreting relative paths against ``cwd``."""
-    resolved = Path(path).expanduser()
+    try:
+        resolved = Path(path).expanduser()
+    except RuntimeError:
+        # ``expanduser`` raises when a ``~user``/``~+`` prefix cannot be mapped to a home directory.
+        # Keep the literal path instead of crashing (the shell likewise leaves such tokens unexpanded).
+        resolved = Path(path)
     if not resolved.is_absolute():
         resolved = Path(cwd) / resolved
     try:
