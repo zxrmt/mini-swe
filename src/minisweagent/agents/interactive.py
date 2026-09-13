@@ -386,7 +386,7 @@ class InteractiveAgent(DefaultAgent):
             self._interrupt(f"Interrupted by user: {interruption_message}")
 
     def execute_actions(self, message: dict) -> list[dict]:
-        # Override to handle user confirmation and confirm_exit, with try/finally to preserve partial outputs
+        # Override to handle user confirmation and confirm_exit, with try/finally to preserve partial outputs.
         actions = message.get("extra", {}).get("actions", [])
         commands = [action["command"] for action in actions]
         outputs = []
@@ -394,12 +394,26 @@ class InteractiveAgent(DefaultAgent):
         try:
             self._ask_confirmation_or_interrupt(commands)
             for action in actions:
-                outputs.append(self.env.execute(action))
-        except Submitted as e:
-            submitted = e
+                try:
+                    outputs.append(self.env.execute(action))
+                except Submitted as e:
+                    submitted = e
+                    break
         finally:
+            # A command that finishes the task raises ``Submitted`` from the environment, and its
+            # result is the exit message recorded below. It must not be backfilled by the
+            # observation formatter as "action was not executed" -- that placeholder is only for
+            # actions that truly did not run (a user-rejected action, or commands after the submit,
+            # which the break above leaves unexecuted). Telling the model its submission failed
+            # makes it retry, and a retry that prints the completion marker ends the task by accident.
+            observation_message = message
+            if submitted is not None:
+                observation_message = {
+                    **message,
+                    "extra": {**(message.get("extra") or {}), "actions": actions[: len(outputs)]},
+                }
             result = self.add_messages(
-                *self.model.format_observation_messages(message, outputs, self.get_template_vars())
+                *self.model.format_observation_messages(observation_message, outputs, self.get_template_vars())
             )
         if submitted is not None:
             # Record and print the submission *before* asking what to do next, so the user

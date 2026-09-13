@@ -2006,3 +2006,60 @@ def test_compact_noop_when_history_is_short():
     agent.messages = [{"role": "system", "content": "s"}, {"role": "user", "content": "u"}]
     assert agent.compact() is None
     assert len(agent.messages) == 2
+
+
+def test_submission_is_not_backfilled_as_not_executed(model_factory):
+    """Regression: the submitting command must not be reported as "action was not executed".
+
+    For tool-call / Responses-API models ``InteractiveAgent.execute_actions`` used to format an
+    observation in its ``finally`` block after ``Submitted`` aborted the action loop. The
+    submitting action produced no output (execution stopped at it), so the formatter backfilled
+    it with ``{"returncode": -1, "exception_info": "action was not executed"}``. The model then
+    believed its submission had failed and kept retrying -- which is how the completion marker
+    ended up being printed again mid-task. The submission belongs to the exit message instead.
+    """
+    factory, config = model_factory
+    with mock_prompts(["", ""]):  # confirm the action, then add no new task
+        agent = InteractiveAgent(
+            model=factory(
+                [("Finish", [{"command": "echo 'COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT'\necho 'final answer'"}])]
+            ),
+            env=LocalEnvironment(),
+            **config,
+        )
+        info = agent.run("Submit and stop")
+
+    assert info["exit_status"] == "Submitted"
+    assert info["submission"] == "final answer\n"
+
+    assert not any((m.get("extra") or {}).get("exception_info") == "action was not executed" for m in agent.messages)
+    # The submission is carried by the exit message, and the submitting step adds no observation.
+    assert agent.messages[-1]["role"] == "exit"
+    assert agent.messages[-1]["content"] == "final answer\n"
+    assert not any("returncode" in (m.get("extra") or {}) for m in agent.messages)
+
+
+def test_new_task_after_submission_has_no_not_executed_placeholder(model_factory):
+    """Continuing with a new task after a submission must not fabricate a failed-submission
+    observation, and commands run after that must still be observed normally."""
+    factory, config = model_factory
+    submit = "echo 'COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT'\necho "
+    with mock_prompts(["", "Do more work", "", "", "", ""]):  # confirm; new task; confirm; confirm; done
+        agent = InteractiveAgent(
+            model=factory(
+                [
+                    ("Finish", [{"command": submit + "'first answer'"}]),
+                    ("Keep going", [{"command": "echo 'more work'"}]),
+                    ("Finish again", [{"command": submit + "'second answer'"}]),
+                ]
+            ),
+            env=LocalEnvironment(),
+            **config,
+        )
+        info = agent.run("Submit, take a new task, submit again")
+
+    assert info["exit_status"] == "Submitted"
+    assert info["submission"] == "second answer\n"
+    assert not any((m.get("extra") or {}).get("exception_info") == "action was not executed" for m in agent.messages)
+    # The ordinary command between the two submissions is observed normally.
+    assert any("more work" in str((m.get("extra") or {}).get("raw_output", "")) for m in agent.messages)
