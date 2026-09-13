@@ -242,7 +242,7 @@ class InteractiveAgent(DefaultAgent):
             console.print("\n     ".join(rows), markup=False)
             return
         if (role := self._message_role(msg)) == "assistant":
-            task = str(self.extra_template_vars.get("task", ""))[:100]
+            task = " ".join(str(self.extra_template_vars.get("task", "")).split())[:100]
             context = self._context_tokens(msg)
             headline = escape(f"[step {self.n_calls}] Current Task >")
             parts = [f"[green]{BULLET}[/green]"]
@@ -412,7 +412,8 @@ class InteractiveAgent(DefaultAgent):
         message = (
             "[bold yellow]Task Completed[/bold yellow] ([bold]/h[/bold] for commands)\n[bold yellow]>[/bold yellow] "
         )
-        user_input = self._prompt_and_handle_slash_commands(message).strip()
+        # Collapse whitespace so a multi-line task doesn't flood the terminal with blank lines.
+        user_input = " ".join(self._prompt_and_handle_slash_commands(message).split())
         if user_input == "/u":  # directly continue
             self._drop_exit_message()
             self._interrupt("Switched to human mode.")

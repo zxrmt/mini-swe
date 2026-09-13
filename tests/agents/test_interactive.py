@@ -1337,6 +1337,43 @@ def test_submission_is_shown_before_asking_for_a_new_task(toolcall_config, capsy
     assert output.index("THE FINAL ANSWER") < output.index("Task Completed")
 
 
+def test_multiline_task_is_collapsed_in_the_status_line(toolcall_config, capsys):
+    """A multi-line task (e.g. pasted terminal output) must not flood the display with blank lines."""
+    agent = InteractiveAgent(
+        model=make_tc_model(
+            [("Finishing", [{"command": "echo 'COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT'\necho 'done'"}])]
+        ),
+        env=LocalEnvironment(),
+        **{**toolcall_config, "mode": "yolo", "confirm_exit": False, "quiet": True},
+    )
+    agent.run("first line\n\n\n\nsecond line")
+    output = capsys.readouterr().out
+    assert "Current Task > first line second line" in output
+    assert "first line\n\n" not in output
+
+
+def test_multiline_new_task_is_collapsed(toolcall_config, capsys):
+    """A multi-line task given at the completion prompt must not add blank lines to the display/history."""
+    agent = InteractiveAgent(
+        model=make_tc_model(
+            [
+                ("First", [{"command": "echo 'COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT'\necho 'one'"}]),
+                ("Second", [{"command": "echo 'COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT'\necho 'two'"}]),
+            ]
+        ),
+        env=LocalEnvironment(),
+        **{**toolcall_config, "mode": "yolo", "confirm_exit": True, "quiet": True},
+    )
+    with mock_prompts(["a new\n\n\n\ntask", ""]):
+        info = agent.run("initial task")
+    output = capsys.readouterr().out
+    assert info["submission"] == "two\n"
+    assert "The user added a new task: a new task" in output
+    assert "a new\n\n" not in output
+    new_task = next(m for m in agent.messages if "The user added a new task" in get_text(m))
+    assert get_text(new_task) == "The user added a new task: a new task"
+
+
 # --- /new: starting a new conversation ---
 
 
