@@ -117,3 +117,139 @@ class TestLitellmModel:
         model = LitellmModel(model_name="gpt-4")
         result = model.format_observation_messages({"extra": {}}, [])
         assert result == []
+
+
+def _stream_chunks(*deltas):
+    return [{"choices": [{"delta": delta}]} for delta in deltas]
+
+
+def _bash_tool_call():
+    tool_call = MagicMock()
+    tool_call.function.name = "bash"
+    tool_call.function.arguments = '{"command": "echo test"}'
+    tool_call.id = "call_1"
+    return tool_call
+
+
+class _FakeClock:
+    """Minimal stand-in for the ``time`` module so the model's clock is deterministic."""
+
+    def __init__(self, monotonic_values):
+        self._values = iter(monotonic_values)
+
+    def monotonic(self):
+        return next(self._values)
+
+    @staticmethod
+    def time():
+        return 0.0
+
+
+def test_query_measures_time_to_first_token_and_output_speed():
+    """Streaming chunks are timed so the status line can show TTFT and tokens/s."""
+    response = _mock_litellm_response([_bash_tool_call()])
+    response.usage.completion_tokens = 100
+    clock = _FakeClock([0.0, 0.5, 2.0])  # request start, first token, stream end
+    with (
+        patch("minisweagent.models.litellm_model.litellm.completion") as mock_completion,
+        patch("minisweagent.models.litellm_model.litellm.stream_chunk_builder", return_value=response),
+        patch("minisweagent.models.litellm_model.litellm.cost_calculator.completion_cost", return_value=0.001),
+        patch("minisweagent.models.litellm_model.time", clock),
+    ):
+        mock_completion.return_value = iter(_stream_chunks({"role": "assistant"}, {"content": "hi"}, {"content": "!"}))
+        msg = LitellmModel(model_name="gpt-4").query([{"role": "user", "content": "test"}])
+
+    assert msg["extra"]["time_to_first_token"] == 0.5
+    assert msg["extra"]["output_tokens"] == 100
+    assert msg["extra"]["output_tokens_per_second"] == pytest.approx(100 / 1.5)
+
+
+def test_query_without_stream_has_no_timing():
+    """`stream: false` in model_kwargs keeps the non-streaming path and reports no timing."""
+    response = _mock_litellm_response([_bash_tool_call()])
+    with (
+        patch("minisweagent.models.litellm_model.litellm.completion", return_value=response) as mock_completion,
+        patch("minisweagent.models.litellm_model.litellm.cost_calculator.completion_cost", return_value=0.001),
+    ):
+        msg = LitellmModel(model_name="gpt-4", model_kwargs={"stream": False}).query(
+            [{"role": "user", "content": "test"}]
+        )
+
+    assert "time_to_first_token" not in msg["extra"]
+    assert "stream" not in mock_completion.call_args.kwargs
+
+
+def test_query_handles_provider_ignoring_stream():
+    """A backend that returns a complete response for stream=True falls back without timing."""
+    response = _mock_litellm_response([_bash_tool_call()])
+    with (
+        patch("minisweagent.models.litellm_model.litellm.completion", return_value=response),
+        patch("minisweagent.models.litellm_model.litellm.cost_calculator.completion_cost", return_value=0.001),
+    ):
+        msg = LitellmModel(model_name="gpt-4").query([{"role": "user", "content": "test"}])
+
+    assert msg["extra"]["actions"] == [{"command": "echo test", "tool_call_id": "call_1"}]
+    assert "time_to_first_token" not in msg["extra"]
+
+
+def _tool_call_chunks(model="custom-model"):
+    """A minimal OpenAI-style stream that ends in a single bash tool call."""
+    return [
+        {
+            "id": "1",
+            "object": "chat.completion.chunk",
+            "created": 0,
+            "model": model,
+            "choices": [{"index": 0, "delta": {"role": "assistant"}, "finish_reason": None}],
+        },
+        {
+            "id": "1",
+            "object": "chat.completion.chunk",
+            "created": 0,
+            "model": model,
+            "choices": [
+                {
+                    "index": 0,
+                    "delta": {
+                        "tool_calls": [
+                            {
+                                "index": 0,
+                                "id": "call_1",
+                                "type": "function",
+                                "function": {"name": "bash", "arguments": '{"command": "echo hi"}'},
+                            }
+                        ]
+                    },
+                    "finish_reason": None,
+                }
+            ],
+        },
+        {
+            "id": "1",
+            "object": "chat.completion.chunk",
+            "created": 0,
+            "model": model,
+            "choices": [{"index": 0, "delta": {}, "finish_reason": "tool_calls"}],
+        },
+        {
+            "id": "1",
+            "object": "chat.completion.chunk",
+            "created": 0,
+            "model": model,
+            "choices": [],
+            "usage": {"prompt_tokens": 5, "completion_tokens": 7, "total_tokens": 12},
+        },
+    ]
+
+
+def test_streaming_query_suppresses_litellm_provider_list(capsys):
+    """litellm's stream builder must not spam the 'Provider List' hint for unprefixed model names."""
+    with (
+        patch("minisweagent.models.litellm_model.litellm.completion", return_value=iter(_tool_call_chunks())),
+        patch("minisweagent.models.litellm_model.litellm.cost_calculator.completion_cost", return_value=0.001),
+    ):
+        msg = LitellmModel(model_name="openai/custom-model").query([{"role": "user", "content": "hi"}])
+
+    assert msg["extra"]["actions"] == [{"command": "echo hi", "tool_call_id": "call_1"}]
+    assert msg["extra"]["output_tokens"] == 7
+    assert "Provider List" not in capsys.readouterr().out

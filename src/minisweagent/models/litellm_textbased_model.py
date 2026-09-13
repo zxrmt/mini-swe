@@ -19,12 +19,11 @@ class LitellmTextbasedModel(LitellmModel):
 
     def _query(self, messages: list[dict[str, str]], **kwargs):
         try:
-            return litellm.completion(
-                model=self.config.model_name, messages=messages, **(self.config.model_kwargs | kwargs)
-            )
+            response, self._last_generation_timing = self._query_with_timing(messages, **kwargs)
         except litellm.exceptions.AuthenticationError as e:
             e.message += " You can permanently set your API key with `mini-extra config set KEY VALUE`."
             raise e
+        return response
 
     def _parse_actions(self, response: dict) -> list[dict]:
         """Parse actions from the model response. Raises FormatError if not exactly one action."""

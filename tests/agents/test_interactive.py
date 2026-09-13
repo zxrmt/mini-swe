@@ -3,6 +3,7 @@ import os
 import time
 from contextlib import contextmanager
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
@@ -1847,3 +1848,65 @@ def test_format_token_count():
     assert InteractiveAgent._format_token_count(832) == "832"
     assert InteractiveAgent._format_token_count(12_345) == "12.3k"
     assert InteractiveAgent._format_token_count(1_234_567) == "1.2M"
+
+
+def test_format_output_speed_and_first_token_time():
+    assert InteractiveAgent._format_output_speed(45.0) == "45 token/s"
+    assert InteractiveAgent._format_output_speed(45.4) == "45 token/s"
+    assert InteractiveAgent._format_first_token_time(1.23) == "fTTFT 1.2s"
+
+
+def test_timing_stats_reads_model_timing():
+    """Both flat and nested (``extra["timing"]``) timing layouts are understood."""
+    assert InteractiveAgent._timing_stats(
+        {"extra": {"time_to_first_token": 1.2, "output_tokens_per_second": 45.0}}
+    ) == (1.2, 45.0)
+    assert InteractiveAgent._timing_stats(
+        {"extra": {"timing": {"time_to_first_token": 0.5, "output_tokens_per_second": 12.0}}}
+    ) == (0.5, 12.0)
+    assert InteractiveAgent._timing_stats({"extra": {}}) == (None, None)
+    assert InteractiveAgent._timing_stats({}) == (None, None)
+
+
+def test_status_line_shows_output_speed_and_first_token_time():
+    """The `[step N] Current Task >` line also carries the output speed and TTFT."""
+    agent = InteractiveAgent.__new__(InteractiveAgent)
+    agent.config = SimpleNamespace(quiet=False, observation_display_lines=3)
+    agent.n_calls = 18
+    agent.extra_template_vars = {"task": "Current Task"}
+    agent.messages = []
+    msg = {
+        "role": "assistant",
+        "content": "hello",
+        "extra": {
+            "actions": [],
+            "response": {"usage": {"prompt_tokens": 25000, "completion_tokens": 200, "total_tokens": 25200}},
+            "time_to_first_token": 1.2,
+            "output_tokens_per_second": 45.0,
+        },
+    }
+    with patch("minisweagent.agents.interactive.console.print") as mock_print:
+        agent._print_message(msg)
+    printed = " ".join(str(call) for call in mock_print.call_args_list)
+    assert "25.2k ctx" in printed
+    assert "(45 token/s)" in printed
+    assert "(fTTFT 1.2s)" in printed
+    assert "[step 18] Current Task >" in printed
+    # speed is shown before TTFT, matching the documented layout
+    assert printed.index("45 token/s") < printed.index("fTTFT")
+
+
+def test_status_line_omits_timing_when_unknown():
+    """Without model timing the status line stays exactly as before (no empty stubs)."""
+    agent = InteractiveAgent.__new__(InteractiveAgent)
+    agent.config = SimpleNamespace(quiet=False, observation_display_lines=3)
+    agent.n_calls = 1
+    agent.extra_template_vars = {"task": "Old task"}
+    agent.messages = []
+    with patch("minisweagent.agents.interactive.console.print") as mock_print:
+        agent._print_message({"role": "assistant", "content": "hi", "extra": {"actions": []}})
+    printed = " ".join(str(call) for call in mock_print.call_args_list)
+    assert "Current Task >" in printed
+    assert "token/s" not in printed
+    assert "fTTFT" not in printed
+    assert "ctx]" not in printed

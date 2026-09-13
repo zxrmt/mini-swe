@@ -195,6 +195,29 @@ class InteractiveAgent(DefaultAgent):
             return f"{n / 1_000:.1f}k"
         return str(n)
 
+    @staticmethod
+    def _format_output_speed(tokens_per_second: float) -> str:
+        """Compact output speed for the status line, e.g. ``45 token/s``."""
+        return f"{tokens_per_second:.0f} token/s"
+
+    @staticmethod
+    def _format_first_token_time(seconds: float) -> str:
+        """Compact time-to-first-token for the status line, e.g. ``fTTFT 1.2s``."""
+        return f"fTTFT {seconds:.1f}s"
+
+    @staticmethod
+    def _timing_stats(msg: dict) -> tuple[float | None, float | None]:
+        """Return ``(time_to_first_token, output_tokens_per_second)`` for the status line.
+
+        Timing is recorded by the model (``msg["extra"]``) when it streams the response;
+        either value is ``None`` when the model did not report it.
+        """
+        extra = msg.get("extra") or {}
+        timing = extra.get("timing") or extra
+        ttft = timing.get("time_to_first_token")
+        speed = timing.get("output_tokens_per_second")
+        return (float(ttft) if ttft is not None else None, float(speed) if speed is not None else None)
+
     def _context_tokens(self, msg: dict) -> int | None:
         """Best-effort size of the current context (in tokens) for the status line.
 
@@ -248,6 +271,11 @@ class InteractiveAgent(DefaultAgent):
             parts = [f"[green]{BULLET}[/green]"]
             if context is not None:
                 parts.append(f"[bold green]{escape(f'[{self._format_token_count(context)} ctx]')}[/bold green]")
+            ttft, speed = self._timing_stats(msg)
+            if speed is not None:
+                parts.append(f"[bold green]{escape(f'({self._format_output_speed(speed)})')}[/bold green]")
+            if ttft is not None:
+                parts.append(f"[bold green]{escape(f'({self._format_first_token_time(ttft)})')}[/bold green]")
             parts.append(f"[bold green]{headline}[/bold green]")
             if task:
                 parts.append(f"[dim cyan]{escape(task)}[/]")
