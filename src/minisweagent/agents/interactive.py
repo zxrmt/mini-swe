@@ -31,6 +31,20 @@ BULLET, ELBOW, ELLIPSIS = (
 )
 
 
+def print_slash_commands_help(mode: str) -> None:
+    """Print the slash command help shown by `/h` (in-session and at the startup prompt)."""
+    console.print(
+        f"Current mode: [bold green]{mode}[/bold green]\n"
+        f"[bold green]/y[/bold green] to switch to [bold yellow]yolo[/bold yellow] mode (execute LM commands without confirmation)\n"
+        f"[bold green]/c[/bold green] to switch to [bold yellow]confirmation[/bold yellow] mode (ask for confirmation before executing LM commands)\n"
+        f"[bold green]/u[/bold green] to switch to [bold yellow]human[/bold yellow] mode (execute commands issued by the user)\n"
+        f"[bold green]/m[/bold green] to enter multiline comment\n"
+        f"[bold green]/new[/bold green] to start a new conversation (discards the current history)\n"
+        f"[bold green]/resume[/bold green] to list saved conversations and continue one\n"
+        f"[bold green]/compact[/bold green] to summarize the conversation into a smaller context",
+    )
+
+
 class NewConversation(InterruptAgentFlow):
     """Raised to discard the current conversation and start a fresh one with a new task."""
 
@@ -528,17 +542,8 @@ class InteractiveAgent(DefaultAgent):
         user_input = prompt_session.prompt("")
         if user_input == "/m":
             return self._prompt_and_handle_slash_commands(prompt, _multiline=True)
-        if user_input == "/h":
-            console.print(
-                f"Current mode: [bold green]{self.config.mode}[/bold green]\n"
-                f"[bold green]/y[/bold green] to switch to [bold yellow]yolo[/bold yellow] mode (execute LM commands without confirmation)\n"
-                f"[bold green]/c[/bold green] to switch to [bold yellow]confirmation[/bold yellow] mode (ask for confirmation before executing LM commands)\n"
-                f"[bold green]/u[/bold green] to switch to [bold yellow]human[/bold yellow] mode (execute commands issued by the user)\n"
-                f"[bold green]/m[/bold green] to enter multiline comment\n"
-                f"[bold green]/new[/bold green] to start a new conversation (discards the current history)\n"
-                f"[bold green]/resume[/bold green] to list saved conversations and continue one\n"
-                f"[bold green]/compact[/bold green] to summarize the conversation into a smaller context",
-            )
+        if user_input in ("/h", "/help"):
+            print_slash_commands_help(self.config.mode)
             return self._prompt_and_handle_slash_commands(prompt)
         if user_input == "/compact":
             before = len(self.messages)

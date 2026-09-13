@@ -60,20 +60,23 @@ def _multiline_prompt() -> str:
     return prompt()
 
 
-def _prompt_for_initial_task(conversation_dir: Path | None) -> tuple[str, Path | None]:
-    """Ask the user for the first task, handling the `/resume` and `/new` commands.
+def _prompt_for_initial_task(conversation_dir: Path | None, mode: str = "confirm") -> tuple[str, Path | None]:
+    """Ask the user for the first task, handling the `/h`, `/resume` and `/new` commands.
 
     Slash commands are handled here (rather than by the agent) because the model is only loaded
     after the user answers, keeping startup cheap. Returns the task to run and, when the user asked
     to resume, the trajectory path to load before running.
     """
-    from minisweagent.agents.interactive import select_conversation
+    from minisweagent.agents.interactive import print_slash_commands_help, select_conversation
 
     conversation_dir = Path(conversation_dir) if conversation_dir else None
     while True:
         console.print("[bold yellow]What do you want to do?")
         console.print("[bold yellow]>[/bold yellow] ", end="")
         user_input = _multiline_prompt().strip()
+        if user_input in ("/h", "/help"):
+            print_slash_commands_help(mode)
+            continue
         if user_input == "/resume" or user_input.startswith("/resume "):
             selected = select_conversation(conversation_dir, user_input[len("/resume") :].strip())
             if selected is not None:
@@ -243,7 +246,9 @@ def main(
     elif (configured_task := config.get("run", {}).get("task", UNSET)) is not UNSET:
         run_task = configured_task
     else:
-        run_task, prompted_resume = _prompt_for_initial_task(config.get("agent", {}).get("conversation_dir"))
+        run_task, prompted_resume = _prompt_for_initial_task(
+            config.get("agent", {}).get("conversation_dir"), str(config.get("agent", {}).get("mode", "confirm"))
+        )
 
     model = get_model(config=config.get("model", {}))
     env = get_environment(config.get("environment", {}), default_type="local")
