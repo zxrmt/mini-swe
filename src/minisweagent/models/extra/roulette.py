@@ -32,6 +32,16 @@ class RouletteModel:
         response["model_name"] = model.config.model_name
         return response
 
+    def query_text(self, *args, **kwargs) -> dict:
+        model = self.select_model()
+        self._n_calls += 1
+        if hasattr(model, "query_text"):
+            response = model.query_text(*args, **kwargs)
+        else:
+            response = model.query(*args, **kwargs)
+        response["model_name"] = model.config.model_name
+        return response
+
     def serialize(self) -> dict:
         return {
             "info": {

@@ -15,7 +15,44 @@ from pydantic import BaseModel
 
 from minisweagent import Environment, Model, __version__
 from minisweagent.exceptions import FormatError, InterruptAgentFlow, LimitsExceeded, TimeExceeded
+from minisweagent.models.utils.content_string import get_content_string
 from minisweagent.utils.serialize import recursive_merge
+
+COMPACTION_SYSTEM_PROMPT = (
+    "You compress an AI coding agent's conversation history into a concise summary so that the agent "
+    "can keep working with a much smaller context. You never run commands; you only reply with the summary."
+)
+
+COMPACTION_TEMPLATE = """\
+The conversation below is getting long. Summarize it so the work can continue with a much smaller context.
+
+<conversation>
+{{ conversation }}
+</conversation>
+
+Reply with a concise Markdown summary using exactly these sections (keep every section, using "(none)" when empty):
+## Objective
+- What the user is trying to accomplish (one or two sentences).
+## Important Details
+- Decisions, constraints, preferences and facts needed to continue.
+## Work State
+### Completed
+- Finished work and verified facts.
+### Active
+- Current work, partial changes and investigation state.
+### Blocked
+- Failing commands, errors and unknowns.
+## Next Move
+1. The immediate next action.
+2. The following action, if known.
+## Relevant Files
+- Files or directories and why they matter.
+
+Rules:
+- Use terse bullets, not prose.
+- Preserve exact file paths, symbols, commands, error strings, URLs and identifiers.
+- Do not mention this summary process or that the context was compacted.
+- Do not run any commands; reply with the summary only."""
 
 
 class AgentConfig(BaseModel):
@@ -25,6 +62,11 @@ class AgentConfig(BaseModel):
     """Template for the system message (the first message)."""
     instance_template: str
     """Template for the first user message specifying the task (the second message overall)."""
+    compaction_template: str = COMPACTION_TEMPLATE
+    """Template used to summarize the conversation when the user runs ``/compact``.
+
+    ``{{ conversation }}`` is replaced with the rendered message history. The model's reply
+    replaces the older messages while the system and task messages are kept."""
     step_limit: int = 0
     """Maximum number of steps the agent can take."""
     wall_time_limit_seconds: int = 0
@@ -74,6 +116,56 @@ class DefaultAgent:
 
     def _render_template(self, template: str) -> str:
         return Template(template, undefined=StrictUndefined).render(**self.get_template_vars())
+
+    def _query_text(self, messages: list[dict]) -> dict:
+        """Ask the model for a plain-text reply (no bash action), for example when summarizing."""
+        if hasattr(self.model, "query_text"):
+            return self.model.query_text(messages)
+        return self.model.query(messages)
+
+    def compact(self) -> str | None:
+        """Summarize the conversation with the configured model and shrink the history.
+
+        The system message and the original task message are kept verbatim; everything else is
+        replaced with a single summary message written by the model, so the agent keeps working
+        with a much smaller context. The summary is built from the task and the whole conversation.
+        Returns the summary, or ``None`` when the conversation is too short to compact.
+        """
+        if len(self.messages) <= 2:
+            return None
+        # Include everything after the system prompt so the summary also captures the task.
+        conversation = "\n\n".join(
+            f"<{role}>\n{get_content_string(message)}\n</{role}>"
+            for message in self.messages[1:]
+            if (role := message.get("role") or "assistant")
+        )
+        prompt = Template(self.config.compaction_template, undefined=StrictUndefined).render(
+            **recursive_merge(self.get_template_vars(), {"conversation": conversation})
+        )
+        response = self._query_text(
+            [
+                self.model.format_message(role="system", content=COMPACTION_SYSTEM_PROMPT),
+                self.model.format_message(role="user", content=prompt),
+            ]
+        )
+        self.cost += response.get("extra", {}).get("cost", 0.0)
+        self.n_calls += 1
+        # Only accept real text content: a model that ignores the instructions and calls a tool
+        # (or only emits reasoning) must not turn its bash command into the summary.
+        summary = get_content_string(response, skip_tool_calls=True, include_reasoning=False).strip()
+        if not summary:
+            return None
+        self.messages = self.messages[:2] + [
+            self.model.format_message(
+                role="user",
+                content=(
+                    "The earlier conversation was compacted into the summary below. Continue the task "
+                    "from here without repeating completed work.\n\n"
+                    f"<summary>\n{summary}\n</summary>"
+                ),
+            )
+        ]
+        return summary
 
     def add_messages(self, *messages: dict) -> list[dict]:
         self.logger.debug(messages)  # set log level to debug to see

@@ -20,7 +20,7 @@ def _make_model_from_fixture(text_outputs: list[str], cost_per_call: float = 1.0
     )
 
 
-def test_local_end_to_end(local_test_data):
+def test_local_end_to_end(local_test_data, tmp_path):
     """Test the complete flow from CLI to final result using real environment but deterministic model"""
 
     model_responses = local_test_data["model_responses"]
@@ -28,6 +28,9 @@ def test_local_end_to_end(local_test_data):
 
     with (
         patch("minisweagent.run.mini.configure_if_first_time"),
+        # Keep `main`'s conversation archiver out of the developer's real
+        # `~/.config/mini-swe-agent/conversations` directory (which `/resume` lists).
+        patch("minisweagent.run.mini.DEFAULT_CONVERSATIONS_DIR", tmp_path / "conversations"),
         patch("minisweagent.models.litellm_model.LitellmModel") as mock_model_class,
         patch("minisweagent.agents.utils.prompt_user.prompt_session.prompt", side_effect=lambda *a, **kw: ""),
         patch(
@@ -59,3 +62,4 @@ def test_local_end_to_end(local_test_data):
     assert_observations_match(expected_observations, messages)
 
     assert agent.n_calls == len(model_responses), f"Expected {len(model_responses)} steps, got {agent.n_calls}"
+    assert list((tmp_path / "conversations").glob("*.traj.json")), "the run should be archived in the test directory"

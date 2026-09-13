@@ -783,6 +783,9 @@ def test_output_file_is_created(tmp_path):
 
     with (
         patch("minisweagent.run.mini.configure_if_first_time"),
+        # Keep the conversation archiver out of the developer's real
+        # `~/.config/mini-swe-agent/conversations` directory (which `/resume` lists).
+        patch("minisweagent.run.mini.DEFAULT_CONVERSATIONS_DIR", tmp_path / "conversations"),
         patch("minisweagent.run.mini.get_model") as mock_get_model,
         patch("minisweagent.run.mini.get_environment") as mock_get_env,
         patch("minisweagent.agents.utils.prompt_user.prompt_session.prompt", return_value=""),

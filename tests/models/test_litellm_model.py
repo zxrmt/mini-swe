@@ -40,6 +40,23 @@ class TestLitellmModel:
 
     @patch("minisweagent.models.litellm_model.litellm.completion")
     @patch("minisweagent.models.litellm_model.litellm.cost_calculator.completion_cost")
+    def test_query_text_returns_content_without_tools_or_tool_calls(self, mock_cost, mock_completion):
+        """`query_text` asks for a plain-text answer (used by `/compact`) and never requires a tool call."""
+        response = _mock_litellm_response(None)
+        response.choices[0].message.model_dump.return_value = {"role": "assistant", "content": "a summary"}
+        mock_completion.return_value = response
+        mock_cost.return_value = 0.001
+
+        model = LitellmModel(model_name="gpt-4")
+        message = model.query_text([{"role": "user", "content": "summarize"}])
+
+        assert message["content"] == "a summary"
+        assert message["extra"]["cost"] == 0.001
+        # No bash tool is sent, so the model is free to reply with plain text.
+        assert "tools" not in mock_completion.call_args.kwargs
+
+    @patch("minisweagent.models.litellm_model.litellm.completion")
+    @patch("minisweagent.models.litellm_model.litellm.cost_calculator.completion_cost")
     def test_parse_actions_valid_tool_call(self, mock_cost, mock_completion):
         tool_call = MagicMock()
         tool_call.function.name = "bash"

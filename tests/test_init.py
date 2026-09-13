@@ -3,6 +3,7 @@
 import os
 import subprocess
 import sys
+from pathlib import Path
 
 import pytest
 
@@ -41,3 +42,21 @@ def test_macos_xdg_config_dir_with_legacy_fallback(tmp_path):
     env = {k: v for k, v in os.environ.items() if k != "MSWEA_GLOBAL_CONFIG_DIR"} | {"HOME": str(tmp_path)}
     result = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, env=env)
     assert result.returncode == 0, result.stderr
+
+
+def test_test_suite_does_not_touch_the_real_global_config_dir():
+    """Regression guard: a test run must not write into the developer's real
+    ``~/.config/mini-swe-agent`` (in particular its ``conversations`` directory, which
+    ``mini``'s ``/resume`` lists).
+
+    ``tests/conftest.py`` redirects ``MSWEA_GLOBAL_CONFIG_DIR`` to a throwaway
+    directory before ``minisweagent`` is imported; this test makes sure that redirect
+    is not dropped, because otherwise driving the real ``main()`` from the test suite
+    would litter the user's conversation list with throwaway trajectories.
+    """
+    from minisweagent import global_config_dir
+    from minisweagent.run.mini import DEFAULT_CONVERSATIONS_DIR
+
+    real_global_config_dir = Path.home() / ".config" / "mini-swe-agent"
+    assert global_config_dir != real_global_config_dir
+    assert not DEFAULT_CONVERSATIONS_DIR.is_relative_to(real_global_config_dir)

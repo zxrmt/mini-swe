@@ -500,8 +500,19 @@ class InteractiveAgent(DefaultAgent):
                 f"[bold green]/u[/bold green] to switch to [bold yellow]human[/bold yellow] mode (execute commands issued by the user)\n"
                 f"[bold green]/m[/bold green] to enter multiline comment\n"
                 f"[bold green]/new[/bold green] to start a new conversation (discards the current history)\n"
-                f"[bold green]/resume[/bold green] to list saved conversations and continue one",
+                f"[bold green]/resume[/bold green] to list saved conversations and continue one\n"
+                f"[bold green]/compact[/bold green] to summarize the conversation into a smaller context",
             )
+            return self._prompt_and_handle_slash_commands(prompt)
+        if user_input == "/compact":
+            before = len(self.messages)
+            if self.compact() is None:
+                console.print("[bold yellow]Nothing to compact yet.[/bold yellow]")
+            else:
+                console.print(
+                    f"[bold green]Conversation compacted[/bold green] "
+                    f"[dim]({before} messages -> {len(self.messages)})[/dim]"
+                )
             return self._prompt_and_handle_slash_commands(prompt)
         if user_input == "/new" or user_input.startswith("/new "):
             task = user_input[len("/new") :].strip()

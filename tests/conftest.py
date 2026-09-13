@@ -1,10 +1,26 @@
+import atexit
 import json
+import os
 import re
+import shutil
 import subprocess
+import tempfile
 import threading
 from pathlib import Path
 
 import pytest
+
+# Keep the test suite out of the developer's real ``~/.config/mini-swe-agent``.
+# ``mini`` archives every conversation there so that ``/resume`` can list it (and it
+# writes ``last_mini_run.traj.json``), while a few tests drive the real ``main()`` /
+# CLI. Without this redirect each ``pytest`` run would leave throwaway trajectories
+# (e.g. "Blah blah blah" / "Test task") in the user's conversation list, which is
+# exactly what ``/resume`` then shows. ``global_config_dir`` is resolved once at
+# import time, so this has to run before ``minisweagent`` is imported (and before
+# pytest collects the test modules).
+_TEST_GLOBAL_CONFIG_DIR = tempfile.mkdtemp(prefix="mini-swe-agent-test-config-")
+os.environ.setdefault("MSWEA_GLOBAL_CONFIG_DIR", _TEST_GLOBAL_CONFIG_DIR)
+atexit.register(shutil.rmtree, _TEST_GLOBAL_CONFIG_DIR, ignore_errors=True)
 
 from minisweagent.models import GLOBAL_MODEL_STATS
 

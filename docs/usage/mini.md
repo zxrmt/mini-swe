@@ -71,6 +71,17 @@ You can also pass the choice on the same line, e.g. `/resume 2`.
 This differs from `-r`/`--resume` on the command line, which continues a single trajectory file that you
 name (or the last run's default output file).
 
+## Compacting the conversation
+
+Long conversations eventually fill the model's context window. Type `/compact` at any prompt to
+summarize the conversation with the very same model that `mini` is configured with (so no extra
+setup or API key is needed) and replace the older messages with that summary. The task and the
+system prompt are kept, so the agent can keep working with a much smaller context. The command is
+also listed in the in-session `/h` help.
+
+The summarization prompt is the `agent.compaction_template` config value; override it in your config
+file to change the shape of the summary.
+
 ## Miscellaneous tips
 
 - `mini` saves the full history of your last run to your global config directory.

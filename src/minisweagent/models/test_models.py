@@ -115,6 +115,13 @@ class DeterministicModel:
         GLOBAL_MODEL_STATS.add(self.config.cost_per_call)
         return output
 
+    def query_text(self, messages: list[dict[str, str]], **kwargs) -> dict:
+        """Return the next scripted output for a plain-text query (no action required)."""
+        self.current_index += 1
+        output = self.config.outputs[self.current_index]
+        GLOBAL_MODEL_STATS.add(self.config.cost_per_call)
+        return output
+
     def format_message(self, **kwargs) -> dict:
         return expand_multimodal_content(kwargs, pattern=self.config.multimodal_regex)
 
@@ -168,6 +175,13 @@ class DeterministicToolcallModel:
         output = self.config.outputs[self.current_index]
         if _process_test_actions(output.get("extra", {}).get("actions", [])):
             return self.query(messages, **kwargs)
+        GLOBAL_MODEL_STATS.add(self.config.cost_per_call)
+        return output
+
+    def query_text(self, messages: list[dict[str, str]], **kwargs) -> dict:
+        """Return the next scripted output for a plain-text query (no action required)."""
+        self.current_index += 1
+        output = self.config.outputs[self.current_index]
         GLOBAL_MODEL_STATS.add(self.config.cost_per_call)
         return output
 
@@ -228,6 +242,13 @@ class DeterministicResponseAPIToolcallModel:
         output = self.config.outputs[self.current_index]
         if _process_test_actions(output.get("extra", {}).get("actions", [])):
             return self.query(messages, **kwargs)
+        GLOBAL_MODEL_STATS.add(self.config.cost_per_call)
+        return output
+
+    def query_text(self, messages: list[dict[str, str]], **kwargs) -> dict:
+        """Return the next scripted output for a plain-text query (no action required)."""
+        self.current_index += 1
+        output = self.config.outputs[self.current_index]
         GLOBAL_MODEL_STATS.add(self.config.cost_per_call)
         return output
 

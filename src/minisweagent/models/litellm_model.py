@@ -112,8 +112,9 @@ class LitellmModel:
         )
 
     def _query(self, messages: list[dict[str, str]], **kwargs):
+        tools = kwargs.pop("tools", [BASH_TOOL])
         try:
-            response, self._last_generation_timing = self._query_with_timing(messages, tools=[BASH_TOOL], **kwargs)
+            response, self._last_generation_timing = self._query_with_timing(messages, tools=tools, **kwargs)
         except litellm.exceptions.AuthenticationError as e:
             e.message += " You can permanently set your API key with `mini-extra config set KEY VALUE`."
             raise e
@@ -216,6 +217,21 @@ class LitellmModel:
         }
         if timing:
             message["extra"].update(timing)
+        return message
+
+    def query_text(self, messages: list[dict], **kwargs) -> dict:
+        """Query the model for a plain-text answer without parsing a bash action.
+
+        Used by the agent to summarize the conversation (``/compact``). Unlike :meth:`query`
+        it sends no tools and does not require the reply to contain a tool call.
+        """
+        for attempt in retry(logger=logger, abort_exceptions=self.abort_exceptions):
+            with attempt:
+                response = self._query(self._prepare_messages_for_api(messages), tools=[], **kwargs)
+        cost_output = self._calculate_cost(response)
+        GLOBAL_MODEL_STATS.add(cost_output["cost"])
+        message = response.choices[0].message.model_dump()
+        message["extra"] = {**cost_output, "response": response.model_dump(), "timestamp": time.time()}
         return message
 
     def _calculate_cost(self, response) -> dict[str, float]:

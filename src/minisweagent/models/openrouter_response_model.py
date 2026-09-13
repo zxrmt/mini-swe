@@ -42,6 +42,7 @@ class OpenRouterResponseModel(OpenRouterModel):
         self._api_url = "https://openrouter.ai/api/v1/responses"
 
     def _query(self, messages: list[dict[str, str]], **kwargs):
+        tools = kwargs.pop("tools", [BASH_TOOL_RESPONSE_API])
         headers = {
             "Authorization": f"Bearer {self._api_key}",
             "Content-Type": "application/json",
@@ -49,9 +50,10 @@ class OpenRouterResponseModel(OpenRouterModel):
         payload = {
             "model": self.config.model_name,
             "input": messages,
-            "tools": [BASH_TOOL_RESPONSE_API],
             **(self.config.model_kwargs | kwargs),
         }
+        if tools:
+            payload["tools"] = tools
         try:
             response = requests.post(self._api_url, headers=headers, data=json.dumps(payload), timeout=60)
             response.raise_for_status()
@@ -100,6 +102,17 @@ class OpenRouterResponseModel(OpenRouterModel):
             **cost_output,
             "timestamp": time.time(),
         }
+        return message
+
+    def query_text(self, messages: list[dict[str, str]], **kwargs) -> dict:
+        """Query OpenRouter's Responses API for a plain-text answer without parsing a bash action."""
+        for attempt in retry(logger=logger, abort_exceptions=self.abort_exceptions):
+            with attempt:
+                response = self._query(self._prepare_messages_for_api(messages), tools=[], **kwargs)
+        cost_output = self._calculate_cost(response)
+        GLOBAL_MODEL_STATS.add(cost_output["cost"])
+        message = dict(response)
+        message["extra"] = {**cost_output, "timestamp": time.time()}
         return message
 
     def _parse_actions(self, response: dict) -> list[dict]:

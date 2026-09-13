@@ -30,6 +30,7 @@ class OpenRouterTextbasedModel(OpenRouterModel):
         self.config = OpenRouterTextbasedModelConfig(**kwargs)
 
     def _query(self, messages: list[dict[str, str]], **kwargs):
+        kwargs.pop("tools", None)  # text-based models never use tools
         headers = {
             "Authorization": f"Bearer {self._api_key}",
             "Content-Type": "application/json",

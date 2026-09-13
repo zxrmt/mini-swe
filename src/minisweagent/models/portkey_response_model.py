@@ -72,11 +72,12 @@ class PortkeyResponseAPIModel:
         self.client = Portkey(**client_kwargs)
 
     def _query(self, messages: list[dict[str, str]], **kwargs):
+        tools = kwargs.pop("tools", [BASH_TOOL_RESPONSE_API])
         return self.client.responses.create(
             model=self.config.model_name,
             input=messages,
-            tools=[BASH_TOOL_RESPONSE_API],
             **(self.config.model_kwargs | kwargs),
+            **({"tools": tools} if tools else {}),
         )
 
     def _prepare_messages_for_api(self, messages: list[dict]) -> list[dict]:
@@ -118,6 +119,17 @@ class PortkeyResponseAPIModel:
             **cost_output,
             "timestamp": time.time(),
         }
+        return message
+
+    def query_text(self, messages: list[dict[str, str]], **kwargs) -> dict:
+        """Query Portkey's Responses API for a plain-text answer without parsing a bash action."""
+        for attempt in retry(logger=logger, abort_exceptions=self.abort_exceptions):
+            with attempt:
+                response = self._query(self._prepare_messages_for_api(messages), tools=[], **kwargs)
+        cost_output = self._calculate_cost(response)
+        GLOBAL_MODEL_STATS.add(cost_output["cost"])
+        message = response.model_dump() if hasattr(response, "model_dump") else dict(response)
+        message["extra"] = {**cost_output, "timestamp": time.time()}
         return message
 
     def _parse_actions(self, response) -> list[dict]:

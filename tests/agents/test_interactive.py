@@ -1910,3 +1910,72 @@ def test_status_line_omits_timing_when_unknown():
     assert "token/s" not in printed
     assert "fTTFT" not in printed
     assert "ctx]" not in printed
+
+
+# --- /compact: shrinking the conversation ---
+
+
+def test_compact_shrinks_history_and_keeps_task(model_factory):
+    """`/compact` replaces the older turns with a model-written summary."""
+    factory, config = model_factory
+    with mock_prompts(
+        [
+            "",  # Confirm the first action
+            "/compact",  # At the second confirmation prompt: summarize the conversation
+            "",  # Confirm the second action after compacting
+            "",  # Confirm the finishing action
+            "",  # No further task
+        ]
+    ):
+        agent = InteractiveAgent(
+            model=factory(
+                [
+                    ("Step A", [{"command": "echo a"}]),
+                    ("Step B", [{"command": "echo b"}]),
+                    ("## Objective\n- Original task\n\n## Next Move\n1. finish", []),
+                    ("Done", [{"command": "echo 'COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT'\necho done"}]),
+                ]
+            ),
+            env=LocalEnvironment(),
+            **config,
+        )
+        info = agent.run("Original task")
+
+    assert info["exit_status"] == "Submitted"
+    assert info["submission"] == "done\n"
+    # Three agent steps plus the compaction call.
+    assert agent.n_calls == 4
+    contents = [get_text(msg) for msg in agent.messages]
+    # The task survives and both completed steps are summarized away.
+    assert any("Original task" in c for c in contents)
+    assert not any("Step A" in c for c in contents)
+    assert not any("Step B" in c for c in contents)
+    assert any("## Objective" in c for c in contents)
+
+
+def test_compact_help_lists_command(model_factory):
+    """The help text advertises the /compact command."""
+    factory, config = model_factory
+    with mock_prompts(["/h", "/compact", "", "", ""]):
+        with patch("minisweagent.agents.interactive.console.print") as mock_print:
+            agent = InteractiveAgent(
+                model=factory(
+                    [
+                        ("Working", [{"command": "echo working"}]),
+                        ("Summary", []),
+                        ("Done", [{"command": "echo 'COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT'\necho done"}]),
+                    ]
+                ),
+                env=LocalEnvironment(),
+                **config,
+            )
+            agent.run("Test help lists /compact")
+    assert any("/compact" in str(call) for call in mock_print.call_args_list)
+
+
+def test_compact_noop_when_history_is_short():
+    """Compacting a conversation that has nothing beyond system and task is a no-op."""
+    agent = InteractiveAgent.__new__(InteractiveAgent)
+    agent.messages = [{"role": "system", "content": "s"}, {"role": "user", "content": "u"}]
+    assert agent.compact() is None
+    assert len(agent.messages) == 2
