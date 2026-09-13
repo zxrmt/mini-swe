@@ -127,6 +127,7 @@ def main(
     model_name: str | None = typer.Option(None, "-m", "--model", help="Model to use",),
     model_class: str | None = typer.Option(None, "--model-class", help="Model class to use (e.g., 'litellm' or 'minisweagent.models.litellm_model.LitellmModel')", rich_help_panel="Advanced"),
     reasoning_effort: str | None = typer.Option(None, "--reasoning-effort", help="Reasoning effort passed to the model (e.g. 'low', 'medium', 'high')", rich_help_panel="Model"),
+    notify_channel: str | None = typer.Option(None, "--notify-channel", help="Where to send a task-completed alert: 'terminal_bell' or 'none'", rich_help_panel="Advanced"),
     agent_class: str | None = typer.Option(None, "--agent-class", help="Agent class to use (e.g., 'interactive' or 'minisweagent.agents.interactive.InteractiveAgent')", rich_help_panel="Advanced"),
     environment_class: str | None = typer.Option(None, "--environment-class", help="Environment class to use (e.g., 'local' or 'minisweagent.environments.local.LocalEnvironment')", rich_help_panel="Advanced"),
     task: str | None = typer.Option(None, "-t", "--task", help="Task/problem statement", show_default=False),
@@ -153,6 +154,7 @@ def main(
             "quiet": True if quiet else UNSET,
             "confirm_exit": False if exit_immediately else UNSET,
             "output_path": output or UNSET,
+            "notify_channel": notify_channel if isinstance(notify_channel, str) else UNSET,
             "conversation_dir": DEFAULT_CONVERSATIONS_DIR,
         },
         "model": {
@@ -165,6 +167,12 @@ def main(
         },
     })
     config = recursive_merge(*configs)
+
+    # A notification channel set at the top level or in the `run` section is forwarded to the
+    # agent config, which owns the "task completed" alert; an explicit agent value still wins.
+    for _source in (config.get("run"), config):
+        if _source and (channel := _source.pop("notify_channel", UNSET)) is not UNSET:
+            config.setdefault("agent", {}).setdefault("notify_channel", channel)
 
     # `MSWEA_REASONING_EFFORT` (e.g. set in the global .env file) is the fallback
     # when neither the config files nor the command line set a reasoning effort.

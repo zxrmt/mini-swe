@@ -96,6 +96,19 @@ MSWEA_GLOBAL_CALL_LIMIT="100"
 MSWEA_MODEL_RETRY_STOP_AFTER_ATTEMPT="10"
 ```
 
+## Notifications
+
+Get an audible alert (the terminal bell, `\a`) when a task finishes:
+
+```bash
+# Notification channel used when a task completes: "terminal_bell" or "none"
+# (default: "none")
+MSWEA_NOTIFY_CHANNEL="terminal_bell"
+```
+
+The same option can be set per run in the yaml config (`agent: notify_channel: terminal_bell`) or
+with the `mini` flag `--notify-channel terminal_bell`.
+
 ## Default config files
 
 ```bash

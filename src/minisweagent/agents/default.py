@@ -4,9 +4,11 @@ or https://minimal-agent.com for a tutorial on the basic building principles.
 
 import json
 import logging
+import os
 import time
 import traceback
 from pathlib import Path
+from typing import Literal
 
 from jinja2 import StrictUndefined, Template
 from pydantic import BaseModel
@@ -31,11 +33,20 @@ class AgentConfig(BaseModel):
     """Exit after this many format errors in a row (0 = no limit)."""
     output_path: Path | None = None
     """Save the trajectory to this path."""
+    notify_channel: Literal["terminal_bell", "none"] = "none"
+    """Where to send the "task completed" alert: ``terminal_bell`` rings the terminal bell, ``none`` is silent.
+
+    An explicitly set value wins; otherwise the ``MSWEA_NOTIFY_CHANNEL`` (or ``NOTIFY_CHANNEL``) environment
+    variable is used as the default."""
 
 
 class DefaultAgent:
     def __init__(self, model: Model, env: Environment, *, config_class: type = AgentConfig, **kwargs):
         """See the `AgentConfig` class for permitted keyword arguments."""
+        if "notify_channel" not in kwargs:
+            channel = os.getenv("MSWEA_NOTIFY_CHANNEL") or os.getenv("NOTIFY_CHANNEL")
+            if channel in ("terminal_bell", "none"):
+                kwargs["notify_channel"] = channel
         self.config = config_class(**kwargs)
         self.messages: list[dict] = []
         self.model = model
@@ -67,7 +78,13 @@ class DefaultAgent:
     def add_messages(self, *messages: dict) -> list[dict]:
         self.logger.debug(messages)  # set log level to debug to see
         self.messages.extend(messages)
+        if any(m.get("role") == "exit" for m in messages) and self.config.notify_channel == "terminal_bell":
+            self._notify_task_completed()
         return list(messages)
+
+    def _notify_task_completed(self) -> None:
+        """Ring the terminal bell (when configured) to alert that the agent has finished."""
+        print("\a", end="", flush=True)
 
     def handle_uncaught_exception(self, e: Exception) -> list[dict]:
         return self.add_messages(
