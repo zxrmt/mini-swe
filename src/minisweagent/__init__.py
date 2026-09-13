@@ -11,6 +11,7 @@ This file provides:
 __version__ = "2.4.6"
 
 import os
+import sys
 from pathlib import Path
 from typing import Any, Protocol
 
@@ -22,11 +23,21 @@ from minisweagent.utils.log import logger
 package_dir = Path(__file__).resolve().parent
 
 
-global_config_dir = Path(os.getenv("MSWEA_GLOBAL_CONFIG_DIR") or user_config_dir("mini-swe-agent"))
+# On macOS, use the XDG-style config dir for consistency with Linux instead of
+# platformdirs' `~/Library/Application Support`.
+default_config_dir = (
+    Path.home() / ".config" / "mini-swe-agent" if sys.platform == "darwin" else Path(user_config_dir("mini-swe-agent"))
+)
+global_config_dir = Path(os.getenv("MSWEA_GLOBAL_CONFIG_DIR") or default_config_dir)
 global_config_dir.mkdir(parents=True, exist_ok=True)
-global_config_file = Path(global_config_dir) / ".env"
+global_config_file = global_config_dir / ".env"
 
 dotenv.load_dotenv(dotenv_path=global_config_file)
+# Config left in the platformdirs location (macOS before the switch) still applies,
+# but only for keys the file above doesn't set (`load_dotenv` doesn't override).
+legacy_config_file = Path(user_config_dir("mini-swe-agent")) / ".env"
+if legacy_config_file != global_config_file:
+    dotenv.load_dotenv(dotenv_path=legacy_config_file)
 
 
 # === Protocols ===
