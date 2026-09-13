@@ -211,10 +211,25 @@ class InteractiveAgent(DefaultAgent):
 
             from minisweagent.models.utils.actions_toolcall import BASH_TOOL
 
-            messages = [{k: v for k, v in m.items() if k != "extra"} for m in self.messages]
+            # Providers differ in message format (e.g. Responses API `input_text` blocks), so
+            # count a provider-neutral text rendering instead of the raw, provider-specific messages.
+            messages = [{"role": m.get("role") or "assistant", "content": get_content_string(m)} for m in self.messages]
             return int(litellm.token_counter(model=self.model.config.model_name, messages=messages, tools=[BASH_TOOL]))
         except Exception:
             return None
+
+    @staticmethod
+    def _message_role(msg: dict) -> str:
+        """Classify a message for display.
+
+        Responses API messages (`get_content_string` already understands their ``output`` array)
+        carry no ``role``/``type``; treat them as the assistant turn they are.
+        """
+        if role := msg.get("role"):
+            return role
+        if msg.get("object") == "response" or "output" in msg:
+            return "assistant"
+        return msg.get("type", "unknown")
 
     def _print_message(self, msg: dict) -> None:
         extra = msg.get("extra", {})
@@ -226,7 +241,7 @@ class InteractiveAgent(DefaultAgent):
             console.print(f"  [{'red' if failed else 'yellow' if truncated else 'green'}]{ELBOW}[/]  ", end="")
             console.print("\n     ".join(rows), markup=False)
             return
-        if (role := msg.get("role") or msg.get("type", "unknown")) == "assistant":
+        if (role := self._message_role(msg)) == "assistant":
             task = str(self.extra_template_vars.get("task", ""))[:100]
             context = self._context_tokens(msg)
             headline = escape(f"[step {self.n_calls}] Current Task >")
