@@ -65,8 +65,13 @@ start over with a fresh task and an empty context. You can pass the task on the 
 
 Every conversation is saved to a `conversations` directory inside your global config directory after
 each step. Type `/resume` at any prompt to list the saved conversations (most recent first, with their
-task, status and number of model calls) and pick one by number to continue it with its history intact.
+task, status and number of model calls) and pick one by number.
 You can also pass the choice on the same line, e.g. `/resume 2`.
+
+Selecting a conversation only *loads* it: `mini` restores the full history, previews the last model
+turn from that conversation so you can see where it left off, and then asks you for a message. That
+message is sent to the model to continue the conversation, so you decide what happens next instead of
+the model being queried automatically.
 
 This differs from `-r`/`--resume` on the command line, which continues a single trajectory file that you
 name (or the last run's default output file).

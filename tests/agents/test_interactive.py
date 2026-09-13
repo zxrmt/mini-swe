@@ -1618,6 +1618,7 @@ def test_resume_lists_and_continues_selected_conversation(model_factory, tmp_pat
         [
             "/resume",  # Confirmation prompt: ask for the list of conversations
             "1",  # Pick the most recent one
+            "carry on",  # Message that continues the resumed conversation
             "",  # Confirm the resumed conversation's submitting action
             "",  # No further task
         ]
@@ -1644,9 +1645,14 @@ def test_resume_lists_and_continues_selected_conversation(model_factory, tmp_pat
     # ...and the discarded first conversation never ran its command.
     assert not any("should not run" in c for c in contents)
     assert agent.conversation_path == tmp_path / "newer.traj.json"
+    # The user's message was added to the resumed conversation before the model was queried.
+    assert "carry on" in contents
     # The list actually showed the conversations as selectable options.
     assert "Saved conversations" in output
     assert "Older task" in output and "Newer task" in output
+    # The loaded conversation is previewed so the user sees where it left off.
+    assert "Resumed conversation" in output
+    assert "working on it" in output
 
 
 def test_resume_with_inline_selection(model_factory, tmp_path):
@@ -1655,7 +1661,7 @@ def test_resume_with_inline_selection(model_factory, tmp_path):
     now = time.time()
     _save_conversation(tmp_path / "a.traj.json", task="A task", mtime=now)
     _save_conversation(tmp_path / "b.traj.json", task="B task", mtime=now - 100)
-    with mock_prompts(["/resume 2", "", ""]):
+    with mock_prompts(["/resume 2", "carry on", "", ""]):
         agent = InteractiveAgent(
             model=factory(
                 [
@@ -1677,7 +1683,7 @@ def test_resume_finished_conversation_continues_it(model_factory, tmp_path):
     """Resuming a conversation that already finished lets the user keep going."""
     factory, config = model_factory
     _save_conversation(tmp_path / "finished.traj.json", task="Finished task", exit_status="Submitted", finished=True)
-    with mock_prompts(["/resume", "1", "", ""]):
+    with mock_prompts(["/resume", "1", "carry on", "", ""]):
         agent = InteractiveAgent(
             model=factory(
                 [
@@ -1693,6 +1699,27 @@ def test_resume_finished_conversation_continues_it(model_factory, tmp_path):
     assert info["exit_status"] == "Submitted"
     assert info["submission"] == "continued\n"
     assert any("Finished task" in get_text(msg) for msg in agent.messages)
+
+
+def test_resume_waits_for_the_user_message_before_querying_model(model_factory, tmp_path, capsys):
+    """Selecting a conversation to resume must only load it: the user's message triggers the query."""
+    factory, config = model_factory
+    path = _save_conversation(tmp_path / "saved.traj.json", task="Saved task")
+    model = factory([("Second", [{"command": "echo 'COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT'\necho 'done'"}])])
+    agent = InteractiveAgent(model=model, env=LocalEnvironment(), **{**config, "conversation_dir": tmp_path})
+
+    agent.resume_conversation(path)
+    assert model.current_index == -1  # loading a conversation does not query the model
+
+    with mock_prompts(["hello agent", "", ""]):
+        info = agent.run("")
+
+    output = capsys.readouterr().out
+    assert info["submission"] == "done\n"
+    assert "hello agent" in [get_text(msg) for msg in agent.messages]
+    # The tail of the loaded conversation is shown so the user can preview what happened before it.
+    assert "Resumed conversation" in output and "Saved task" in output
+    assert "working on it" in output
 
 
 def test_resume_without_saved_conversations_reprompts(model_factory, tmp_path, capsys):

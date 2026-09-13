@@ -160,6 +160,7 @@ class InteractiveAgent(DefaultAgent):
         super().__init__(*args, config_class=config_class, **kwargs)
         self.cost_last_confirmed = 0.0
         self.conversation_path: Path | None = None
+        self._awaiting_resume_message = False
 
     def run(self, task: str = "", **kwargs) -> dict:
         if not self.messages:  # fresh conversation: give it its own file so `/resume` can find it later
@@ -293,6 +294,11 @@ class InteractiveAgent(DefaultAgent):
 
     def query(self) -> dict:
         # Extend supermethod to handle human mode
+        if self._awaiting_resume_message:
+            # `/resume` only loads a conversation: let the user type the message that continues it
+            # rather than querying the model straight away.
+            self._awaiting_resume_message = False
+            self.add_messages({"role": "user", "content": self._prompt_for_resume_message()})
         if self.config.mode == "human":
             match command := self._prompt_and_handle_slash_commands("[bold yellow]>[/bold yellow] "):
                 case "/y" | "/c":
@@ -399,6 +405,7 @@ class InteractiveAgent(DefaultAgent):
         self.n_consecutive_format_errors = 0
         self.extra_template_vars = {"task": task}
         self._start_time = time.time()
+        self._awaiting_resume_message = False
         self.conversation_path = self._new_conversation_path(task)
         return self.add_messages(
             self.model.format_message(role="system", content=self._render_template(self.config.system_template)),
@@ -420,7 +427,11 @@ class InteractiveAgent(DefaultAgent):
         return path
 
     def resume_conversation(self, path: Path) -> list[dict]:
-        """Load a saved conversation and continue it in place of the current one."""
+        """Load a saved conversation and continue it in place of the current one.
+
+        The model is not queried until the user types a message, so picking a conversation
+        with `/resume` only loads it.
+        """
         output_path = self.config.output_path
         self.load(path)
         # `load` retargets the output file to the loaded trajectory; keep the session's own output
@@ -428,7 +439,21 @@ class InteractiveAgent(DefaultAgent):
         self.config.output_path = output_path
         self.conversation_path = path
         self._drop_exit_message()  # the saved run was finished: drop the exit so that run() keeps going
+        self._print_resumed_conversation_preview()  # show where the conversation left off
+        self._awaiting_resume_message = True  # wait for the user instead of querying the model
         return self.messages
+
+    def _print_resumed_conversation_preview(self) -> None:
+        """Show the tail of a just-resumed conversation so the user can preview where it left off."""
+        task = " ".join(str(self.extra_template_vars.get("task", "")).split())
+        title = "[bold]Resumed conversation[/bold]" + (f" [dim]- {escape(task)}[/dim]" if task else "")
+        console.print(Rule(title))
+        # The last model turn and everything after it (the observations it produced).
+        last_assistant = max(
+            (i for i, msg in enumerate(self.messages) if self._message_role(msg) == "assistant"), default=-1
+        )
+        for msg in self.messages[last_assistant:]:
+            self._print_message(msg)
 
     def _select_conversation(self, selection: str) -> Path | None:
         return select_conversation(self.config.conversation_dir, selection)
@@ -483,6 +508,17 @@ class InteractiveAgent(DefaultAgent):
                     f"Commands not executed. The user rejected your commands with the following message: {user_input}",
                     itype="UserRejection",
                 )
+
+    def _prompt_for_resume_message(self) -> str:
+        """Ask the user for the message that continues a conversation loaded with `/resume`."""
+        prompt = (
+            "[bold yellow]Resumed conversation.[/bold yellow] "
+            "[green]Type a message for the model[/green] (/h for commands)\n[bold yellow]>[/bold yellow] "
+        )
+        while True:
+            message = self._prompt_and_handle_slash_commands(prompt).strip()
+            if message and message not in self._MODE_COMMANDS_MAPPING:
+                return message
 
     def _prompt_and_handle_slash_commands(self, prompt: str, *, _multiline: bool = False) -> str:
         """Prompts the user, takes care of /h (followed by requery) and sets the mode. Returns the user input."""
