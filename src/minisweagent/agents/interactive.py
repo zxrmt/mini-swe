@@ -534,7 +534,7 @@ class InteractiveAgent(DefaultAgent):
         elif user_input:
             self.extra_template_vars["task"] = user_input
             self._drop_exit_message()
-            self._interrupt(f"The user added a new task: {user_input}", itype="UserNewTask")
+            self._interrupt(f"> {user_input}", itype="UserNewTask")
         return None
 
     def _drop_exit_message(self) -> None:
