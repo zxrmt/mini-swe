@@ -2063,3 +2063,44 @@ def test_new_task_after_submission_has_no_not_executed_placeholder(model_factory
     assert not any((m.get("extra") or {}).get("exception_info") == "action was not executed" for m in agent.messages)
     # The ordinary command between the two submissions is observed normally.
     assert any("more work" in str((m.get("extra") or {}).get("raw_output", "")) for m in agent.messages)
+
+
+def _unanswered_tool_calls(messages: list[dict]) -> list[str]:
+    """Tool calls advertised by an assistant turn that never received a response (API-invalid)."""
+    answered_tool = {m.get("tool_call_id") for m in messages if m.get("role") == "tool"}
+    answered_output = {m.get("call_id") for m in messages if m.get("type") == "function_call_output"}
+    unanswered = []
+    for msg in messages:
+        for tc in msg.get("tool_calls") or []:
+            if tc.get("id") not in answered_tool:
+                unanswered.append(tc["id"])
+        output = msg.get("output")
+        if isinstance(output, list):
+            for item in output:
+                if item.get("type") == "function_call" and item.get("call_id") not in answered_output:
+                    unanswered.append(item["call_id"])
+    return unanswered
+
+
+def test_new_task_after_submission_leaves_no_unanswered_tool_calls(model_factory):
+    """Regression: continuing after a submission must not leave an advertised tool call without
+    a response, or the API rejects the next query with "the following tool_call_ids did not have
+    response messages" (raised once the user adds a new task at the "Task Completed" prompt)."""
+    factory, config = model_factory
+    submit = "echo 'COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT'\necho "
+    with mock_prompts(["", "Do more work", "", "", "", ""]):  # confirm; new task; confirm; confirm; done
+        agent = InteractiveAgent(
+            model=factory(
+                [
+                    ("Finish", [{"command": submit + "'first answer'"}]),
+                    ("Keep going", [{"command": "echo 'more work'"}]),
+                    ("Finish again", [{"command": submit + "'second answer'"}]),
+                ]
+            ),
+            env=LocalEnvironment(),
+            **config,
+        )
+        info = agent.run("Submit, take a new task, submit again")
+
+    assert info["exit_status"] == "Submitted"
+    assert _unanswered_tool_calls(agent.messages) == []

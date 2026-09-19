@@ -61,6 +61,31 @@ class ResumeConversation(InterruptAgentFlow):
         super().__init__()
 
 
+def _drop_unanswered_tool_calls(message: dict, n_answered: int) -> None:
+    """Drop the tool calls beyond the first ``n_answered`` from an assistant message.
+
+    Used when a submission aborts the action loop: the aborted calls receive no observation
+    message, and the API rejects any history where an advertised tool call has no matching
+    response. Mutates ``message`` in place (it is the same object held in ``self.messages``).
+    """
+    if message.get("tool_calls"):
+        # OpenAI chat-completions format: tool_calls are parallel to extra.actions.
+        message["tool_calls"] = message["tool_calls"][:n_answered]
+        if not message["tool_calls"]:
+            message.pop("tool_calls")
+    elif message.get("object") == "response":
+        # Responses API format: function_call items are parallel to extra.actions.
+        answered_ids = {
+            action.get("tool_call_id")
+            for action in (message.get("extra") or {}).get("actions", [])[:n_answered]
+        }
+        message["output"] = [
+            item
+            for item in message.get("output", [])
+            if item.get("type") != "function_call" or item.get("call_id") in answered_ids
+        ]
+
+
 @dataclass
 class SavedConversation:
     """A trajectory file that `/resume` can offer to the user."""
@@ -412,6 +437,12 @@ class InteractiveAgent(DefaultAgent):
                     **message,
                     "extra": {**(message.get("extra") or {}), "actions": actions[: len(outputs)]},
                 }
+                # The submitting call (and anything after it) never receives an observation, so the
+                # assistant turn must not advertise it either. The API requires every advertised tool
+                # call to be followed by its response message; when the conversation continues after
+                # the submission (new task, /u, /resume), an unanswered call makes the whole history
+                # fail with "the following tool_call_ids did not have response messages".
+                _drop_unanswered_tool_calls(message, len(outputs))
             result = self.add_messages(
                 *self.model.format_observation_messages(observation_message, outputs, self.get_template_vars())
             )
