@@ -1,4 +1,5 @@
 import json
+import os
 import re
 import subprocess
 import sys
@@ -1084,3 +1085,53 @@ def test_initial_prompt_new_with_inline_task(tmp_path):
 
     mock_agent.run.assert_called_once_with("build a thing")
     mock_agent.resume_conversation.assert_not_called()
+
+
+@pytest.mark.parametrize(("flag",), [("--tokens",), ("--token",)])
+def test_tokens_flag_replaces_anthropic_api_key(flag, tmp_path, monkeypatch):
+    """`mini --tokens <key>` (and its `--token` alias) rewrites ANTHROPIC_API_KEY in the config file."""
+    from typer.testing import CliRunner
+
+    config_file = tmp_path / ".env"
+    config_file.write_text("MSWEA_MODEL_NAME='gpt-5'\nANTHROPIC_API_KEY='sk-old'\n")
+    monkeypatch.setattr("minisweagent.run.utilities.config.global_config_file", config_file)
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-old")
+
+    with (
+        patch("minisweagent.run.mini.configure_if_first_time"),
+        patch("minisweagent.run.mini.get_agent", return_value=Mock()),
+        patch("minisweagent.run.mini.get_model"),
+        patch("minisweagent.run.mini.get_environment", return_value=Mock()),
+    ):
+        result = CliRunner().invoke(
+            app,
+            [flag, "sk-new", "-m", "gpt-5", "-t", "test", "-c", str(DEFAULT_CONFIG_FILE)],
+        )
+
+    assert result.exit_code == 0, result.output
+    content = config_file.read_text()
+    assert "ANTHROPIC_API_KEY='sk-new'" in content
+    assert "sk-old" not in content
+    assert "MSWEA_MODEL_NAME='gpt-5'" in content
+    assert os.environ["ANTHROPIC_API_KEY"] == "sk-new"
+    assert "ANTHROPIC_API_KEY" in result.output
+
+
+def test_no_tokens_flag_leaves_config_file_alone(tmp_path, monkeypatch):
+    """Without --tokens, the global config file is not modified."""
+    from typer.testing import CliRunner
+
+    config_file = tmp_path / ".env"
+    config_file.write_text("ANTHROPIC_API_KEY='sk-old'\n")
+    monkeypatch.setattr("minisweagent.run.utilities.config.global_config_file", config_file)
+
+    with (
+        patch("minisweagent.run.mini.configure_if_first_time"),
+        patch("minisweagent.run.mini.get_agent", return_value=Mock()),
+        patch("minisweagent.run.mini.get_model"),
+        patch("minisweagent.run.mini.get_environment", return_value=Mock()),
+    ):
+        result = CliRunner().invoke(app, ["-m", "gpt-5", "-t", "test", "-c", str(DEFAULT_CONFIG_FILE)])
+
+    assert result.exit_code == 0, result.output
+    assert "ANTHROPIC_API_KEY='sk-old'" in config_file.read_text()

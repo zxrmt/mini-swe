@@ -23,6 +23,8 @@ Useful switches:
   It's enough to specify the name of the config file, e.g., `-c mini.yaml` (see [global configuration](../advanced/global_configuration.md) for how it is resolved).
 - `-m`/`--model`: Specify a model to use, else we will use the model `MSWEA_MODEL_NAME` environment variable (see [global configuration](../advanced/global_configuration.md))
 - `--reasoning-effort`: Set the model's reasoning effort (e.g. `low`, `medium`, `high`). Equivalent to `model.reasoning_effort` in the config file (see [model settings](../models/quickstart.md)).
+- `--tokens`/`--token`: Replace the `ANTHROPIC_API_KEY` in your global config file (`.env`, see [global configuration](../advanced/global_configuration.md)) with the given key and use it for this run.
+  Handy for rotating keys: `mini --tokens sk-...`
 - `-y`/`--yolo`: Start in `yolo` mode (see below)
 - `-r`/`--resume`: Resume an interrupted run from its saved trajectory instead of starting a new task.
   Resumes the `-o`/`--output` file (or a trajectory passed as a positional argument).

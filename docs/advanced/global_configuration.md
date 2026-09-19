@@ -33,6 +33,14 @@ mini-extra config set MSWEA_MODEL_NAME "anthropic/claude-sonnet-4-5-20250929"
 mini-extra config set ANTHROPIC_API_KEY "sk-..."
 ```
 
+To replace your Anthropic API key when starting a run (e.g. when rotating keys), use the `mini` flag:
+
+```bash
+mini --tokens "sk-..."
+```
+
+which rewrites `ANTHROPIC_API_KEY` in the `.env` file and uses the new key for that run.
+
 or to unset a key:
 
 ```bash

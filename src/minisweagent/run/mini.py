@@ -18,7 +18,7 @@ from minisweagent.agents import get_agent
 from minisweagent.config import builtin_config_dir, get_config_from_spec
 from minisweagent.environments import get_environment
 from minisweagent.models import get_api_base, get_model, get_model_name, get_reasoning_effort
-from minisweagent.run.utilities.config import configure_if_first_time
+from minisweagent.run.utilities.config import configure_if_first_time, set_token
 from minisweagent.utils.serialize import UNSET, recursive_merge
 
 DEFAULT_CONFIG_FILE = Path(os.getenv("MSWEA_MINI_CONFIG_PATH", builtin_config_dir / "mini.yaml"))
@@ -131,6 +131,7 @@ def main(
     model_class: str | None = typer.Option(None, "--model-class", help="Model class to use (e.g., 'litellm' or 'minisweagent.models.litellm_model.LitellmModel')", rich_help_panel="Advanced"),
     reasoning_effort: str | None = typer.Option(None, "--reasoning-effort", help="Reasoning effort passed to the model (e.g. 'low', 'medium', 'high')", rich_help_panel="Model"),
     notify_channel: str | None = typer.Option(None, "--notify-channel", help="Where to send a task-completed alert: 'terminal_bell' or 'none'", rich_help_panel="Advanced"),
+    tokens: str | None = typer.Option(None, "--tokens", "--token", help="API key that replaces ANTHROPIC_API_KEY in the global config file (the .env file) and is used for this run"),
     agent_class: str | None = typer.Option(None, "--agent-class", help="Agent class to use (e.g., 'interactive' or 'minisweagent.agents.interactive.InteractiveAgent')", rich_help_panel="Advanced"),
     environment_class: str | None = typer.Option(None, "--environment-class", help="Environment class to use (e.g., 'local' or 'minisweagent.environments.local.LocalEnvironment')", rich_help_panel="Advanced"),
     task: str | None = typer.Option(None, "-t", "--task", help="Task/problem statement", show_default=False),
@@ -143,6 +144,9 @@ def main(
     resume_path: Path | None = typer.Argument(None, help="Trajectory to resume from (defaults to the --output file)."),
 ) -> Any:
     # fmt: on
+    # `main` can also be called directly from python, where typer passes an `OptionInfo` default.
+    if isinstance(tokens, str) and tokens:
+        set_token(tokens)
     configure_if_first_time()
 
     # Build the config from the command line arguments

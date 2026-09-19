@@ -119,6 +119,13 @@ def unset(key: str | None = Argument(None, help="The key to unset")):
     _reload_config()
 
 
+def set_token(token: str, key_name: str = "ANTHROPIC_API_KEY"):
+    """Replace an API key in the global config file and apply it to the current process."""
+    set_key(global_config_file, key_name, token)
+    os.environ[key_name] = token
+    console.print(f"Updated [bold green]{key_name}[/bold green] in '{global_config_file}'")
+
+
 @app.command()
 def edit():
     """Edit the global config file."""

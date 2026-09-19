@@ -3,7 +3,7 @@ from unittest.mock import patch
 
 import pytest
 
-from minisweagent.run.utilities.config import app, configure_if_first_time, edit, set, setup, unset
+from minisweagent.run.utilities.config import app, configure_if_first_time, edit, set, set_token, setup, unset
 
 
 @pytest.fixture(autouse=True)
@@ -370,6 +370,48 @@ class TestConfigUnset:
             assert "MSWEA_CONFIGURED" not in content
             # Model should remain
             assert "MSWEA_MODEL_NAME='gpt-4'" in content
+
+
+class TestSetToken:
+    """Test the set_token function used by `mini --tokens <key>`."""
+
+    def test_set_token_replaces_existing_key(self, tmp_path, monkeypatch):
+        """An existing ANTHROPIC_API_KEY is replaced in place, other settings are kept."""
+        config_file = tmp_path / ".env"
+        config_file.write_text("MSWEA_MODEL_NAME='anthropic/glm-5.3'\nANTHROPIC_API_KEY='sk-old'\n")
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-old")
+
+        with patch("minisweagent.run.utilities.config.global_config_file", config_file):
+            set_token("sk-new")
+
+        content = config_file.read_text()
+        assert "ANTHROPIC_API_KEY='sk-new'" in content
+        assert "sk-old" not in content
+        assert "MSWEA_MODEL_NAME='anthropic/glm-5.3'" in content
+        # The new key is available to the current process without restarting
+        assert os.environ["ANTHROPIC_API_KEY"] == "sk-new"
+
+    def test_set_token_creates_missing_key_and_file(self, tmp_path, monkeypatch):
+        """The key is appended when missing and the file is created when it doesn't exist."""
+        config_file = tmp_path / ".env"
+        config_file.write_text("MSWEA_MODEL_NAME='gpt-5'\n")
+        monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+
+        with patch("minisweagent.run.utilities.config.global_config_file", config_file):
+            set_token("sk-new")
+
+        assert "MSWEA_MODEL_NAME='gpt-5'\nANTHROPIC_API_KEY='sk-new'" in config_file.read_text()
+        assert os.environ["ANTHROPIC_API_KEY"] == "sk-new"
+
+    def test_set_token_other_key_name(self, tmp_path):
+        """A different key name can be updated as well."""
+        config_file = tmp_path / ".env"
+        config_file.write_text("OPENAI_API_KEY='sk-old'\n")
+
+        with patch("minisweagent.run.utilities.config.global_config_file", config_file):
+            set_token("sk-new", "OPENAI_API_KEY")
+
+        assert "OPENAI_API_KEY='sk-new'" in config_file.read_text()
 
 
 class TestConfigEdit:
