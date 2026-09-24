@@ -15,6 +15,7 @@ minisweagent/run  # Run scripts that serve as an entry point
 
 - The project embraces polymorphism: Every individual class should be simple, but we offer alternatives
 - Every use case should start with a run script, that picks one agent, environment, and model class to run
+- Global config (API keys, `MSWEA_*` settings) is loaded from `~/.config/mini-swe-agent/.env` by default (override the directory with `MSWEA_GLOBAL_CONFIG_DIR`)
 
 # Style guide
 
